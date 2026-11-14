@@ -14,6 +14,7 @@ function serialize(n: SceneNode): SerializedNode {
     type: n.type,
     props,
     layout: n.layout,
+    ...(n.component ? { component: n.component } : {}),
     fontFamilies: n.fontFamilies,
     children: n.type === "Text" ? [] : layerChildren(n).map(serialize),
   };

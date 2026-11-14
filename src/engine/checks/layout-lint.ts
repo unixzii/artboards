@@ -1,7 +1,7 @@
 // Layout and legibility rules checked against a laid-out artboard.
 
 import type { Diagnostic } from "../../shared/diagnostics.ts";
-import { nodePath, sourceOf, walk, type SceneNode } from "../../shared/scene.ts";
+import { isComponentNode, nodePath, sourceOf, walk, type SceneNode } from "../../shared/scene.ts";
 import { naturalTextHeight, type TextEngine } from "../../shared/text.ts";
 
 const label = (n: SceneNode) => `<${n.type}${n.props.name ? ` "${n.props.name}"` : ""}>`;
@@ -19,9 +19,17 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
     out.push({ severity: "warning", rule, message, source: sourceOf(n), frame, node: nodePath(n) });
 
   walk(root, (n) => {
-    if (n.type === "#text") return;
-    const { x, y, width, height } = n.layout;
-    const p = n.parent;
+    if (n.type === "#text" || isComponentNode(n)) return;
+    const { width, height } = n.layout;
+    let x = n.layout.x;
+    let y = n.layout.y;
+    let cursor = n.parent;
+    while (cursor && isComponentNode(cursor)) {
+      x += cursor.layout.x;
+      y += cursor.layout.y;
+      cursor = cursor.parent;
+    }
+    const p = cursor;
     const inFlow = p && (p.type === "Row" || p.type === "Column");
 
     if (width === 0 || height === 0) {

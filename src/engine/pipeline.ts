@@ -8,7 +8,7 @@ import { releaseParagraphs } from "../shared/text.ts";
 import { checkFrame } from "./checks/layout-lint.ts";
 import { typecheck } from "./checks/typecheck.ts";
 import { loadModule } from "./dsl/loader.ts";
-import { createSceneRoot } from "./dsl/reconciler.ts";
+import { createSceneRoot, groupComponents } from "./dsl/reconciler.ts";
 import { DslError } from "./dsl/schema.ts";
 import { layoutTree } from "./layout.ts";
 import { createTextEngine, type NodeEngine } from "./skia.ts";
@@ -54,7 +54,7 @@ export function pickFrames(frames: FrameEntry[], name: string | undefined, file:
 }
 
 /** Reconciles one artboard into a SceneNode tree without initializing WASM layout or fonts. */
-export function reconcileFrame(frame: FrameEntry): { root: SceneNode; unmount(): void } {
+export function reconcileFrame(frame: FrameEntry, opts: { group?: boolean } = {}): { root: SceneNode; unmount(): void } {
   const scene = createSceneRoot();
   scene.render(createElement(frame.component));
   const roots = scene.root.children.filter((c) => c.type !== "#text");
@@ -62,13 +62,16 @@ export function reconcileFrame(frame: FrameEntry): { root: SceneNode; unmount():
     scene.unmount();
     throw new DslError(`Artboard ${frame.name} must return exactly one root element, got ${roots.length}.`);
   }
-  return { root: roots[0], unmount: () => scene.unmount() };
+  const root = roots[0];
+  if (opts.group !== false) groupComponents(root);
+  return { root, unmount: () => scene.unmount() };
 }
 
 export async function buildFrame(frame: FrameEntry): Promise<BuiltFrame> {
-  const { root, unmount } = reconcileFrame(frame);
+  const { root, unmount } = reconcileFrame(frame, { group: false });
   const engine = await createTextEngine();
   await layoutTree(root, engine);
+  groupComponents(root);
   return {
     name: frame.name,
     root,

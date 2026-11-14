@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { listFrames, reconcileFrame } from "../engine/pipeline.ts";
 import type { Comment, NewComment, ResolvedComment } from "../shared/protocol.ts";
-import { layerHint, nodeAtPath, nodePath, sourceOf, textContentOf, walk, type SceneNode } from "../shared/scene.ts";
+import { formatPropsSummary, layerHint, nodeAtPath, nodePath, sourceOf, textContentOf, walk, type SceneNode } from "../shared/scene.ts";
 
 export const commentsPath = (file: string) => file.replace(/\.[^./\\]+$/, "") + ".comments.json";
 
@@ -47,6 +47,10 @@ export function updateComment(file: string, id: number, change: { resolved?: boo
 }
 
 export function describeNode(n: SceneNode): string {
+  if (n.component) {
+    const summary = formatPropsSummary(n.component.props);
+    return `<${n.component.name}${summary ? ` ${summary}` : ""}>`;
+  }
   const detail = n.type === "Text" ? textContentOf(n).slice(0, 32) : n.props.name;
   return `<${n.type}${detail ? ` ${JSON.stringify(detail)}` : ""}>`;
 }

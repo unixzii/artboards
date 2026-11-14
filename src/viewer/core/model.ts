@@ -56,6 +56,7 @@ function hydrate(s: SerializedNode, frame: ViewFrame, path: string, parent: View
     type: s.type,
     props: s.props,
     layout,
+    component: s.component,
     fontFamilies: s.fontFamilies,
     children: [],
     parent,
@@ -110,7 +111,15 @@ function hitNode(n: ViewNode, px: number, py: number): ViewNode | null {
     const hit = hitNode(n.children[i], lx, ly);
     if (hit) return hit;
   }
-  return inside ? n : null;
+  return inside && !n.component ? n : null;
+}
+
+/** Nearest enclosing user component instance above `node`, if any. */
+export function enclosingComponent(node: ViewNode): ViewNode | null {
+  for (let p = node.parent; p; p = p.parent) {
+    if (p.component) return p;
+  }
+  return null;
 }
 
 /** Deepest layer under a canvas point. */

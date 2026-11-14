@@ -9,6 +9,20 @@ export interface Box {
 
 export type Padding = number | [number, number] | [number, number, number, number];
 
+export const COMPONENT_TYPE = "#component";
+
+export function isComponentNode(node: { type: string }): boolean {
+  return node.type === COMPONENT_TYPE;
+}
+
+/** Metadata captured for a user-defined JSX component instance. */
+export interface ComponentInfo {
+  name: string;
+  props: Record<string, unknown>;
+  /** Call-site "file:line" where `<Component ... />` was instantiated. */
+  source?: string;
+}
+
 /** Minimal node contract required by shared text measurement and Skia painting. */
 export interface PaintableNode {
   type: string;
@@ -16,6 +30,8 @@ export interface PaintableNode {
   children: PaintableNode[];
   /** Position relative to parent, filled in by layout. */
   layout: Box;
+  /** Present when this node represents a virtual component instance (`type === "#component"`). */
+  component?: ComponentInfo;
   /** Only for "#text" nodes. */
   text?: string;
   /** Laid-out Skia paragraph, only for Text nodes. Owned by the text module. */
@@ -28,9 +44,11 @@ export interface PaintableNode {
 
 export interface SceneNode extends PaintableNode {
   id: number;
-  type: string; // "Frame" | "Row" | ... | "#text" | "#root"
+  type: string; // "Frame" | "Row" | ... | "#component" | "#text" | "#root"
   children: SceneNode[];
   parent: SceneNode | null;
+  /** Outermost-to-innermost component instances enclosing this host node before grouping. */
+  componentStack?: ComponentInfo[];
 }
 
 let nextId = 1;
@@ -48,7 +66,7 @@ export function createNode(type: string, props: Record<string, any>): SceneNode 
 
 /** Where the node was written, e.g. "examples/page1.jsx:12". */
 export function sourceOf(node: PaintableNode): string | undefined {
-  return node.props.$source;
+  return node.component?.source ?? node.props.$source;
 }
 
 export function textContentOf(node: PaintableNode): string {
@@ -57,8 +75,22 @@ export function textContentOf(node: PaintableNode): string {
   return node.children.map((n) => n.text ?? "").join("");
 }
 
-/** Text for a Text layer, otherwise the layer's name. Also used as the comment anchor hint. */
+/** Compact `k="v"` summary of component props for tree rows and anchor hints. */
+export function formatPropsSummary(props: Record<string, unknown>): string {
+  return Object.entries(props)
+    .map(([k, v]) => {
+      if (typeof v === "boolean") return v ? k : "";
+      if (typeof v === "string") return `${k}=${JSON.stringify(v.length > 24 ? v.slice(0, 24) + "…" : v)}`;
+      if (typeof v === "number") return `${k}=${v}`;
+      return `${k}=${JSON.stringify(v)}`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** Text for a Text layer, props summary for a Component, otherwise the layer's name. */
 export function layerHint(node: PaintableNode): string {
+  if (node.component) return formatPropsSummary(node.component.props);
   return node.type === "Text" ? textContentOf(node) : (node.props.name ?? "");
 }
 

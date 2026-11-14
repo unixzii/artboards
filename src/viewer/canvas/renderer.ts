@@ -15,7 +15,7 @@ export class Renderer implements StageBackend {
   private ck: CanvasKit;
   private els: StageElements;
   private engine: TextEngine;
-  private paints: { white: Paint; select: Paint; hover: Paint; error: Paint };
+  private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint };
   private surface: Surface | null = null;
   private fontLoads = new Map<string, Promise<void>>();
   private pictures = new Map<string, SkPicture>();
@@ -49,7 +49,14 @@ export class Renderer implements StageBackend {
     };
     const white = new ck.Paint();
     white.setColor(ck.WHITE);
-    this.paints = { white, select: stroke(37, 99, 235), hover: stroke(37, 99, 235, 0.55), error: stroke(220, 38, 38) };
+    this.paints = {
+      white,
+      select: stroke(37, 99, 235),
+      hover: stroke(37, 99, 235, 0.55),
+      compSelect: stroke(124, 58, 237),
+      compHover: stroke(124, 58, 237, 0.55),
+      error: stroke(220, 38, 38),
+    };
 
     this.resize();
     this.observer = new ResizeObserver(() => this.resize());
@@ -228,8 +235,12 @@ export class Renderer implements StageBackend {
         canvas.drawRect(rect, paints.error);
       }
     }
-    if (this.hovered && this.hovered !== this.selected) this.outline(canvas, this.hovered, paints.hover, 1.5);
-    if (this.selected) this.outline(canvas, this.selected, paints.select, 2);
+    if (this.hovered && this.hovered !== this.selected) {
+      this.outline(canvas, this.hovered, this.hovered.component ? paints.compHover : paints.hover, 1.5);
+    }
+    if (this.selected) {
+      this.outline(canvas, this.selected, this.selected.component ? paints.compSelect : paints.select, 2);
+    }
     canvas.restore();
     surface.flush();
 

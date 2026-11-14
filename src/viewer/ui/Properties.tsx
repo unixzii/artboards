@@ -1,9 +1,10 @@
 import { useViewer, useViewerState } from "../core/context.ts";
-import type { ViewNode } from "../core/model.ts";
+import { enclosingComponent, type ViewNode } from "../core/model.ts";
 import { Empty, LinkButton, Section } from "./primitives.tsx";
 import { ProblemItem } from "./ProblemItem.tsx";
 
 const COLOR_PROPS = new Set(["fill", "stroke", "color"]);
+const COLOR_VALUE = /^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]+\))$/i;
 // Shown elsewhere in the panel (header, text box) or internal.
 const HIDDEN_PROPS = new Set(["$source", "children", "name"]);
 
@@ -17,7 +18,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 }
 
 function PropRow({ name, value }: { name: string; value: unknown }) {
-  const isColor = COLOR_PROPS.has(name) && typeof value === "string";
+  const isColor = typeof value === "string" && (COLOR_PROPS.has(name) || COLOR_VALUE.test(value.trim()));
   return (
     <div className="row">
       <span className="k">{name}</span>
@@ -30,16 +31,21 @@ function PropRow({ name, value }: { name: string; value: unknown }) {
 }
 
 function Inspector({ node }: { node: ViewNode }) {
+  const viewer = useViewer();
   const diagnostics = useViewerState((s) => s.diagnostics);
-  const source: string | undefined = node.props.$source;
-  const props = Object.entries(node.props).filter(([name]) => !HIDDEN_PROPS.has(name));
+  const comp = node.component;
+  const owner = enclosingComponent(node);
+  const source: string | undefined = comp ? comp.source : node.props.$source;
+  const props = comp
+    ? Object.entries(comp.props)
+    : Object.entries(node.props).filter(([name]) => !HIDDEN_PROPS.has(name));
   const problems = diagnostics.filter((d) => d.frame === node.frame.name && d.node === node.path);
   return (
     <>
       <div className="prop-head">
-        <div className="title">
-          {node.type}
-          {node.props.name && ` “${node.props.name}”`}
+        <div className={`title${comp ? " comp-title" : ""}`}>
+          {comp ? `❖ ${comp.name}` : node.type}
+          {!comp && node.props.name && ` “${node.props.name}”`}
         </div>
         <div className="source">
           {source ? (
@@ -48,6 +54,14 @@ function Inspector({ node }: { node: ViewNode }) {
             </LinkButton>
           ) : (
             node.frame.name
+          )}
+          {owner && (
+            <span className="owner">
+              {" · in "}
+              <LinkButton title="Select enclosing component" onClick={() => viewer.select(owner.key)}>
+                ❖ {owner.component!.name}
+              </LinkButton>
+            </span>
           )}
         </div>
       </div>

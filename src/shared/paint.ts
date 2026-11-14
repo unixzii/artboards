@@ -1,7 +1,7 @@
 // Scene tree -> Skia canvas. Platform-free: used by both Node export and browser viewer.
 
 import type { Canvas, CanvasKit } from "canvaskit-wasm";
-import type { PaintableNode } from "./scene.ts";
+import { isComponentNode, type PaintableNode } from "./scene.ts";
 import { paragraphFor, type TextEngine } from "./text.ts";
 
 export function paintNode(engine: TextEngine, canvas: Canvas, node: PaintableNode) {
@@ -13,7 +13,9 @@ export function paintNode(engine: TextEngine, canvas: Canvas, node: PaintableNod
   canvas.save();
   canvas.translate(x, y);
 
-  if (node.type === "Text") {
+  if (isComponentNode(node)) {
+    for (const child of node.children) paintNode(engine, canvas, child);
+  } else if (node.type === "Text") {
     const para = paragraphFor(engine, node);
     para.layout(w);
     canvas.drawParagraph(para, 0, 0);

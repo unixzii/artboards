@@ -2,7 +2,7 @@
 // sides can import it without pulling in each other's runtime code.
 
 import type { Diagnostic } from "./diagnostics.ts";
-import type { Box } from "./scene.ts";
+import type { Box, ComponentInfo } from "./scene.ts";
 import type { FontFace } from "./text.ts";
 
 export interface Comment {
@@ -40,6 +40,7 @@ export interface SerializedNode {
   /** Props as written, minus children. For Text, `children` is the text. */
   props: Record<string, any>;
   layout: Box;
+  component?: ComponentInfo;
   fontFamilies?: string[];
   children: SerializedNode[];
 }

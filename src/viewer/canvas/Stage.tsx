@@ -87,7 +87,7 @@ function CommentBox() {
     // Pointer and wheel events stay in the box instead of panning the canvas.
     <div className="anchored popover" style={anchor(draft.at)} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
       <div className="target">
-        {node.frame.name} · {node.type} {describe(node)}
+        {node.frame.name} · {node.component ? `❖ ${node.component.name}` : node.type} {describe(node)}
       </div>
       <textarea ref={input} placeholder="What should change?" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown} />
       <div className="actions">
