@@ -2,16 +2,15 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { formatTree, toJson } from "../lib/inspect.ts";
-import { checkFrame, errorToDiagnostic, formatDiagnostic, lintFile } from "../lib/lint.ts";
-import type { Diagnostic } from "../lib/shared/protocol.ts";
-import { renderToPng } from "../lib/shared/paint.ts";
-import { buildFrame, listFrames, pickFrames } from "../lib/pipeline.ts";
-import { commentsPath, updateComment } from "../lib/comments.ts";
-import { generateDocs } from "../lib/dsl/schema.ts";
-import { buildScene } from "../lib/serialize.ts";
-import { startDevServer } from "./dev-server.ts";
-import { ensureTypes } from "../lib/typecheck.ts";
+import { checkFrame } from "../engine/checks/layout-lint.ts";
+import { ensureTypes } from "../engine/checks/typecheck.ts";
+import { generateDocs } from "../engine/dsl/schema.ts";
+import { formatTree, toJson } from "../engine/inspect.ts";
+import { buildFrame, errorToDiagnostic, lintFile, listFrames, pickFrames } from "../engine/pipeline.ts";
+import { renderToPng } from "../engine/skia.ts";
+import { commentsPath, resolveFileComments, updateComment } from "../server/comments.ts";
+import { startDevServer } from "../server/dev-server.ts";
+import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
 
 const USAGE = `Usage:
   artboards lint    <file> [--json]                              type-check, render and check every artboard
@@ -67,7 +66,7 @@ async function main(): Promise<number> {
       console.log(ok ? `Resolved comment #${values.resolve}.` : `No comment #${values.resolve} in ${commentsPath(file)}.`);
       return ok ? 0 : 1;
     }
-    const comments = (await buildScene(file)).comments.filter((c) => values.all || !c.resolved);
+    const comments = resolveFileComments(file).filter((c) => values.all || !c.resolved);
     if (values.json) {
       console.log(JSON.stringify(comments, null, 2));
       return 0;

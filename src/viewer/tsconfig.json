@@ -1,5 +1,5 @@
 {
-  // Browser side. No Node types, so importing anything outside lib/shared
+  // Browser side. No Node types, so importing anything outside src/shared
   // (which would drag in node:fs and friends) fails the type check.
   "extends": "../../tsconfig.json",
   "compilerOptions": {
@@ -7,5 +7,5 @@
     "types": [],
     "jsx": "react-jsx"
   },
-  "include": ["."]
+  "include": [".", "../shared"]
 }
