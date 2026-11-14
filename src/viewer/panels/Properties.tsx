@@ -21,7 +21,32 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
+function ShadowValue({ shadow }: { shadow: Record<string, unknown> }) {
+  const color = typeof shadow.color === "string" ? shadow.color : "rgba(0, 0, 0, 0.25)";
+  const parts = [`${shadow.x ?? 0}, ${shadow.y ?? 0}`, `blur ${shadow.blur ?? 0}`];
+  if (shadow.spread) parts.push(`spread ${shadow.spread}`);
+  return (
+    <div>
+      <span className="swatch" style={{ background: color }} />
+      {parts.join(" · ")}
+    </div>
+  );
+}
+
 function PropRow({ name, value }: { name: string; value: unknown }) {
+  if (name === "shadow" && typeof value === "object" && value !== null) {
+    const list = Array.isArray(value) ? value : [value];
+    return (
+      <div className="row">
+        <span className="k">{name}</span>
+        <span className="v">
+          {list.map((s, i) => (
+            <ShadowValue key={i} shadow={s as Record<string, unknown>} />
+          ))}
+        </span>
+      </div>
+    );
+  }
   const isColor = typeof value === "string" && (COLOR_PROPS.has(name) || COLOR_VALUE.test(value.trim()));
   return (
     <div className="row">

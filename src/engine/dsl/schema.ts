@@ -1,6 +1,8 @@
 // Single source of truth for the DSL: runtime validation, the generated
 // `types/artboards.d.ts`, and the `artboards docs` reference all come from here.
 
+import { parseViewBox } from "../../shared/scene.ts";
+
 type PropType =
   | { kind: "number"; min?: number }
   | { kind: "size" }
@@ -8,6 +10,8 @@ type PropType =
   | { kind: "string" }
   | { kind: "boolean" }
   | { kind: "padding" }
+  | { kind: "shadow" }
+  | { kind: "viewBox" }
   | { kind: "enum"; values: readonly string[] }
   | { kind: "children"; of: "nodes" | "text" };
 
@@ -15,6 +19,7 @@ interface PropDef {
   type: PropType;
   doc: string;
   default?: string;
+  required?: boolean;
 }
 
 const num = (doc: string, def?: string, min = 0): PropDef => ({ type: { kind: "number", min }, doc, default: def });
@@ -41,6 +46,16 @@ const paint = {
 
 const radius = { cornerRadius: num("Corner radius in px.", "0") } satisfies Record<string, PropDef>;
 
+const shadowProp: PropDef = {
+  type: { kind: "shadow" },
+  doc: "Drop shadow or array of shadows: `{ x?, y?, blur?, spread?, color? }`.",
+};
+
+const effects = {
+  shadow: shadowProp,
+  backdropBlur: num("Frosted-glass blur radius in px applied to content behind this element.", "0"),
+} satisfies Record<string, PropDef>;
+
 const container = {
   padding: { type: { kind: "padding" }, doc: "Inner spacing: all | [vertical, horizontal] | [top, right, bottom, left].", default: "0" },
   clip: { type: { kind: "boolean" }, doc: "Clip children to this element's bounds.", default: "false" },
@@ -61,15 +76,15 @@ interface ElementDef {
 export const ELEMENTS: Record<string, ElementDef> = {
   Frame: {
     doc: "Free-form container. Children are positioned absolutely with x/y. Use as the artboard root (fixed width/height).",
-    props: { ...box, ...paint, ...radius, ...container },
+    props: { ...box, ...paint, ...radius, ...effects, ...container },
   },
   Row: {
     doc: "Lays children out left to right.",
-    props: { ...box, ...paint, ...radius, ...container, ...flex },
+    props: { ...box, ...paint, ...radius, ...effects, ...container, ...flex },
   },
   Column: {
     doc: "Lays children out top to bottom.",
-    props: { ...box, ...paint, ...radius, ...container, ...flex },
+    props: { ...box, ...paint, ...radius, ...effects, ...container, ...flex },
   },
   Text: {
     doc: 'Text. Hugs its content on one line by default; set width (px or "fill") to make it wrap.',
@@ -80,16 +95,33 @@ export const ELEMENTS: Record<string, ElementDef> = {
       fontWeight: oneOf(["100", "200", "300", "400", "500", "600", "700", "800", "900"], "Font weight.", "400"),
       lineHeight: num("Line height in px. Defaults to the font's natural line height (about 1.2x fontSize).", undefined, 1),
       textAlign: oneOf(["left", "center", "right"], "Horizontal alignment of lines within the text box.", '"left"'),
+      shadow: shadowProp,
       children: { type: { kind: "children", of: "text" }, doc: "The text: strings and numbers only." },
     },
   },
   Rect: {
     doc: "Rectangle. Has no content, so give it a size.",
-    props: { ...box, ...paint, ...radius },
+    props: { ...box, ...paint, ...radius, ...effects },
   },
   Ellipse: {
     doc: "Ellipse inscribed in its box. Equal width and height make a circle.",
-    props: { ...box, ...paint },
+    props: { ...box, ...paint, ...effects },
+  },
+  Path: {
+    doc: 'SVG vector path. Set `viewBox` to scale path coordinates into `width`/`height`, or omit `viewBox` to draw in local px (hugging bounds by default). Draws `fill` and/or `stroke` when specified.',
+    props: {
+      ...box,
+      d: { type: { kind: "string" }, doc: 'SVG path data string (e.g. `"M 4 12 L 10 18 L 20 6"`).', required: true },
+      viewBox: {
+        type: { kind: "viewBox" },
+        doc: 'Coordinate system `[minX, minY, width, height]` or `"minX minY width height"` mapped into the box.',
+      },
+      ...paint,
+      strokeCap: oneOf(["butt", "round", "square"], "Line cap style for open subpaths.", '"butt"'),
+      strokeJoin: oneOf(["miter", "round", "bevel"], "Corner join style for stroked vertices.", '"miter"'),
+      fillRule: oneOf(["nonzero", "evenodd"], "Interior winding rule when `fill` is set.", '"nonzero"'),
+      ...effects,
+    },
   },
 };
 
@@ -107,6 +139,14 @@ const HINTS: Record<string, string> = {
   borderRadius: "use `cornerRadius`",
   radius: "use `cornerRadius`",
   border: "use `stroke` and `strokeWidth`",
+  boxShadow: "use `shadow` (e.g. shadow={{ y: 4, blur: 12, color: \"rgba(0,0,0,0.12)\" }})",
+  dropShadow: "use `shadow`",
+  textShadow: "use `shadow`",
+  backdropFilter: "use `backdropBlur` (radius in px)",
+  blur: "use `backdropBlur` for frosted glass or `shadow={{ blur }}` for drop shadows",
+  strokeLinecap: "use `strokeCap`",
+  strokeLinejoin: "use `strokeJoin`",
+  path: "use `d` on <Path>",
   style: "pass style values as individual props",
   className: "there is no CSS; pass style values as individual props",
   direction: "use <Row> or <Column>",
@@ -121,6 +161,9 @@ const ELEMENT_HINTS: Record<string, string> = {
   Box: "use <Frame>, <Row> or <Column>",
   View: "use <Frame>, <Row> or <Column>",
   Stack: "use <Row> or <Column>",
+  Svg: 'use <Path d="..." viewBox="0 0 24 24" />',
+  SVG: 'use <Path d="..." viewBox="0 0 24 24" />',
+  Vector: 'use <Path d="..." />',
 };
 
 export class DslError extends Error {
@@ -144,6 +187,22 @@ export function unknownExport(name: string): DslError {
 
 const INTERNAL = new Set(["key", "ref", "$source"]);
 const COLOR = /^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]+\))$/i;
+const SHADOW_KEYS = new Set(["x", "y", "blur", "spread", "color"]);
+
+function isShadowObject(v: unknown): boolean {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const obj = v as Record<string, unknown>;
+  for (const k of Object.keys(obj)) {
+    if (!SHADOW_KEYS.has(k)) return false;
+  }
+  const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+  if (obj.x != null && !isNum(obj.x)) return false;
+  if (obj.y != null && !isNum(obj.y)) return false;
+  if (obj.blur != null && (!isNum(obj.blur) || obj.blur < 0)) return false;
+  if (obj.spread != null && !isNum(obj.spread)) return false;
+  if (obj.color != null && (typeof obj.color !== "string" || !COLOR.test(obj.color.trim()))) return false;
+  return true;
+}
 
 function describe(t: PropType, prop: string): string {
   switch (t.kind) {
@@ -159,6 +218,10 @@ function describe(t: PropType, prop: string): string {
       return "true or false";
     case "padding":
       return "a number, [vertical, horizontal] or [top, right, bottom, left]";
+    case "shadow":
+      return 'a shadow `{ x?, y?, blur?, spread?, color? }` or array of shadows';
+    case "viewBox":
+      return '`[minX, minY, width, height]` or `"minX minY width height"` with positive width and height';
     case "enum":
       return `one of ${t.values.map((v) => (NUMERIC_ENUMS.has(prop) ? v : JSON.stringify(v))).join(", ")}`;
     case "children":
@@ -181,6 +244,10 @@ function matches(t: PropType, v: unknown, prop: string): boolean {
       return typeof v === "boolean";
     case "padding":
       return (isNum(v) && v >= 0) || (Array.isArray(v) && (v.length === 2 || v.length === 4) && v.every((n) => isNum(n) && n >= 0));
+    case "shadow":
+      return isShadowObject(v) || (Array.isArray(v) && v.every(isShadowObject));
+    case "viewBox":
+      return parseViewBox(v) !== null;
     case "enum":
       return t.values.includes(NUMERIC_ENUMS.has(prop) ? String(v) : (v as string)) && (NUMERIC_ENUMS.has(prop) || typeof v === "string");
     case "children":
@@ -216,6 +283,11 @@ export function validateProps(type: string, props: Record<string, any>) {
       );
     }
   }
+  for (const [key, prop] of Object.entries(def.props)) {
+    if (prop.required && props[key] == null) {
+      throw new DslError(`Missing required prop \`${key}\` on <${type}>.`, src);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- generators
@@ -234,6 +306,10 @@ function tsType(t: PropType, prop: string): string {
       return "boolean";
     case "padding":
       return "Padding";
+    case "shadow":
+      return "Shadow | Shadow[]";
+    case "viewBox":
+      return "ViewBox";
     case "enum":
       return t.values.map((v) => (NUMERIC_ENUMS.has(prop) ? v : JSON.stringify(v))).join(" | ");
     case "children":
@@ -257,13 +333,28 @@ export function generateDts(): string {
     "  export type Color = string;",
     "  /** all | [vertical, horizontal] | [top, right, bottom, left] */",
     "  export type Padding = number | [number, number] | [number, number, number, number];",
+    "  export interface Shadow {",
+    "    /** Horizontal offset in px. Default 0. */",
+    "    x?: number;",
+    "    /** Vertical offset in px. Default 0. */",
+    "    y?: number;",
+    "    /** Blur radius in px. Default 0. */",
+    "    blur?: number;",
+    "    /** Spread distance in px. Default 0. */",
+    "    spread?: number;",
+    '    /** Shadow color. Default "rgba(0, 0, 0, 0.25)". */',
+    "    color?: Color;",
+    "  }",
+    '  /** `[minX, minY, width, height]` or `"minX minY width height"`. */',
+    "  export type ViewBox = string | [number, number, number, number];",
     "  export type TextContent = string | number | null | undefined | false;",
   ];
   for (const [name, el] of Object.entries(ELEMENTS)) {
     out.push("", `  export interface ${name}Props {`);
     for (const [prop, def] of Object.entries(el.props)) {
       const doc = def.default ? `${def.doc} Default ${def.default}.` : def.doc;
-      out.push(`    /** ${doc} */`, `    ${prop}?: ${tsType(def.type, prop)};`);
+      const opt = def.required ? "" : "?";
+      out.push(`    /** ${doc} */`, `    ${prop}${opt}: ${tsType(def.type, prop)};`);
     }
     out.push("  }", `  /** ${el.doc} */`, `  export function ${name}(props: ${name}Props): ReactNode;`);
   }
@@ -326,7 +417,8 @@ export function generateDocs(): string {
     out.push("", `### <${name}>`, "", el.doc, "");
     for (const [prop, def] of Object.entries(el.props)) {
       const type = tsType(def.type, prop).replace("TextContent | TextContent[]", "string | number");
-      out.push(`- \`${prop}\`: ${type}${def.default ? ` = ${def.default}` : ""} — ${def.doc}`);
+      const req = def.required ? " *(required)*" : "";
+      out.push(`- \`${prop}\`: ${type}${def.default ? ` = ${def.default}` : ""}${req} — ${def.doc}`);
     }
   }
   out.push(

@@ -18,8 +18,9 @@ import {
   TaffyTree,
   loadTaffy,
 } from "taffy-layout";
-import { layerChildren, type Padding, type SceneNode } from "../shared/scene.ts";
-import { measureText, type TextEngine } from "../shared/text.ts";
+import type { CanvasKit } from "canvaskit-wasm";
+import { layerChildren, parseViewBox, type Padding, type PaintableNode, type SceneNode } from "../shared/scene.ts";
+import { measureText, type Constraint, type TextEngine } from "../shared/text.ts";
 
 type ParentKind = "row" | "column" | "free";
 
@@ -88,6 +89,30 @@ function styleFor(node: SceneNode, parent: ParentKind): Style {
   return s;
 }
 
+function measurePath(ck: CanvasKit, node: PaintableNode, known: Constraint): { width: number; height: number } {
+  if (known.width != null && known.height != null) return { width: known.width, height: known.height };
+  const vb = parseViewBox(node.props.viewBox);
+  if (vb) {
+    const [, , vbW, vbH] = vb;
+    if (known.width != null) return { width: known.width, height: known.width * (vbH / vbW) };
+    if (known.height != null) return { width: known.height * (vbW / vbH), height: known.height };
+    return { width: vbW, height: vbH };
+  }
+  const d = typeof node.props.d === "string" ? node.props.d.trim() : "";
+  const path = d ? ck.Path.MakeFromSVGString(d) : null;
+  if (!path) return { width: known.width ?? 0, height: known.height ?? 0 };
+  const b = path.computeTightBounds();
+  path.delete();
+  if (b[0] === 0 && b[1] === 0 && b[2] === 0 && b[3] === 0) {
+    return { width: known.width ?? 0, height: known.height ?? 0 };
+  }
+  const pad = node.props.stroke ? (node.props.strokeWidth ?? 1) / 2 : 0;
+  return {
+    width: known.width ?? Math.ceil(Math.max(0, b[2] + pad)),
+    height: known.height ?? Math.ceil(Math.max(0, b[3] + pad)),
+  };
+}
+
 let taffyReady: Promise<unknown> | undefined;
 
 /** Lays out one artboard (a single root node) and writes `layout` on every node. */
@@ -99,7 +124,7 @@ export async function layoutTree(root: SceneNode, engine: TextEngine) {
   const build = (node: SceneNode, parent: ParentKind): bigint => {
     const style = styleFor(node, parent);
     let id: bigint;
-    if (node.type === "Text") {
+    if (node.type === "Text" || node.type === "Path") {
       id = tree.newLeafWithContext(style, node);
     } else {
       const kind = kindOf(node);
@@ -119,6 +144,7 @@ export async function layoutTree(root: SceneNode, engine: TextEngine) {
     (known: any, available: any, _id: bigint, context: SceneNode | undefined, style: Style) => {
       style.free();
       if (!context) return { width: 0, height: 0 };
+      if (context.type === "Path") return measurePath(engine.ck, context, known);
       return measureText(engine, context, known, available);
     },
   );

@@ -10,5 +10,6 @@ export const Column = "Column";
 export const Text = "Text";
 export const Rect = "Rect";
 export const Ellipse = "Ellipse";
+export const Path = "Path";
 
-export type { Padding } from "../../shared/scene.ts";
+export type { Padding, Shadow, ViewBox } from "../../shared/scene.ts";

@@ -227,6 +227,7 @@ export class Renderer implements StageBackend {
       if (picture) {
         canvas.drawRect(rect, paints.white);
         canvas.save();
+        canvas.clipRect(rect, ck.ClipOp.Intersect, true);
         canvas.translate(f.x, f.y);
         canvas.drawPicture(picture);
         canvas.restore();

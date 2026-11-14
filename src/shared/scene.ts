@@ -9,6 +9,33 @@ export interface Box {
 
 export type Padding = number | [number, number] | [number, number, number, number];
 
+export interface Shadow {
+  x?: number;
+  y?: number;
+  blur?: number;
+  spread?: number;
+  color?: string;
+}
+
+export type ViewBox = string | [number, number, number, number];
+
+export function parseViewBox(vb: unknown): [number, number, number, number] | null {
+  if (Array.isArray(vb)) {
+    if (vb.length !== 4 || !vb.every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+    return vb[2] > 0 && vb[3] > 0 ? [vb[0], vb[1], vb[2], vb[3]] : null;
+  }
+  if (typeof vb === "string") {
+    const trimmed = vb.trim();
+    if (!trimmed) return null;
+    const parts = trimmed.split(/[\s,]+/);
+    if (parts.length !== 4) return null;
+    const nums = parts.map((s) => (s === "" ? NaN : Number(s)));
+    if (!nums.every((n) => Number.isFinite(n)) || nums[2] <= 0 || nums[3] <= 0) return null;
+    return [nums[0], nums[1], nums[2], nums[3]];
+  }
+  return null;
+}
+
 export const COMPONENT_TYPE = "#component";
 
 export function isComponentNode(node: { type: string }): boolean {

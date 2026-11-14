@@ -4,6 +4,7 @@ import {
   Circle,
   Component,
   Frame,
+  Spline,
   Square,
   StretchHorizontal,
   StretchVertical,
@@ -27,6 +28,8 @@ export function LayerIcon({ node, size = 13 }: { node: ViewNode; size?: number }
       return <Square size={size} className="layer-icon" />;
     case "Ellipse":
       return <Circle size={size} className="layer-icon" />;
+    case "Path":
+      return <Spline size={size} className="layer-icon" />;
     default:
       return <Square size={size} className="layer-icon" />;
   }

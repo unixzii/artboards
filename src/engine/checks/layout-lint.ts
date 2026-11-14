@@ -54,6 +54,19 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
       warn(n, "ignored-position", `${label(n)} has x/y but its parent is a <${p.type}>, which positions children itself. Remove x/y or use a <Frame> parent.`);
     }
 
+    if (n.type === "Path") {
+      const d = typeof n.props.d === "string" ? n.props.d.trim() : "";
+      const parsed = d ? engine.ck.Path.MakeFromSVGString(d) : null;
+      if (!parsed) {
+        warn(n, "invalid-path", `${label(n)} has an invalid or empty SVG path \`d\`.`);
+      } else {
+        parsed.delete();
+        if (!n.props.fill && !n.props.stroke && !(n.props.backdropBlur > 0)) {
+          warn(n, "unpainted-path", `${label(n)} has neither \`fill\` nor \`stroke\` and will not be visible.`);
+        }
+      }
+    }
+
     if (n.type === "Text") {
       const natural = naturalTextHeight(engine, n);
       if (natural > height + 0.5) {
