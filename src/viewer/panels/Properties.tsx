@@ -1,6 +1,10 @@
+import { Check, Component, Copy } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Empty, LinkButton } from "../components/primitives.tsx";
+import { Section } from "../components/Section.tsx";
 import { useViewer, useViewerState } from "../core/context.ts";
 import { enclosingComponent, type ViewNode } from "../core/model.ts";
-import { Empty, LinkButton, Section } from "./primitives.tsx";
+import { LayerIcon } from "./LayerIcon.tsx";
 import { ProblemItem } from "./ProblemItem.tsx";
 
 const COLOR_PROPS = new Set(["fill", "stroke", "color"]);
@@ -30,6 +34,26 @@ function PropRow({ name, value }: { name: string; value: unknown }) {
   );
 }
 
+function SourceCopy({ source }: { source: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    setCopied(false);
+  }, [source]);
+
+  const copy = () => {
+    navigator.clipboard?.writeText(source);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <LinkButton title="Copy source location" onClick={copy}>
+      <span>{source}</span>
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+    </LinkButton>
+  );
+}
+
 function Inspector({ node }: { node: ViewNode }) {
   const viewer = useViewer();
   const diagnostics = useViewerState((s) => s.diagnostics);
@@ -44,22 +68,20 @@ function Inspector({ node }: { node: ViewNode }) {
     <>
       <div className="prop-head">
         <div className={`title${comp ? " comp-title" : ""}`}>
-          {comp ? `❖ ${comp.name}` : node.type}
-          {!comp && node.props.name && ` “${node.props.name}”`}
+          <LayerIcon node={node} size={14} />
+          <span>
+            {comp ? comp.name : node.type}
+            {!comp && node.props.name && ` “${node.props.name}”`}
+          </span>
         </div>
         <div className="source">
-          {source ? (
-            <LinkButton title="Copy" onClick={() => navigator.clipboard?.writeText(source)}>
-              {source}
-            </LinkButton>
-          ) : (
-            node.frame.name
-          )}
+          {source ? <SourceCopy source={source} /> : node.frame.name}
           {owner && (
             <span className="owner">
               {" · in "}
               <LinkButton title="Select enclosing component" onClick={() => viewer.select(owner.key)}>
-                ❖ {owner.component!.name}
+                <Component size={11} />
+                <span>{owner.component!.name}</span>
               </LinkButton>
             </span>
           )}

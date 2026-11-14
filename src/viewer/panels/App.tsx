@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Stage } from "../canvas/Stage.tsx";
+import { SidePanel } from "../components/SidePanel.tsx";
 import { useViewerState } from "../core/context.ts";
 import { Comments } from "./Comments.tsx";
 import { LayerTree } from "./LayerTree.tsx";
@@ -24,15 +25,15 @@ export function App() {
     // On narrow screens the right panel is a bottom sheet shown only with a selection.
     <div id="app" className={hasSelection ? "has-selection" : undefined}>
       <Toolbar />
-      <aside id="left">
+      <SidePanel id="left" side="left" defaultWidth={260} minWidth={180} maxWidth={480}>
         <LayerTree />
         <Problems />
-      </aside>
+      </SidePanel>
       <Stage />
-      <aside id="right">
+      <SidePanel id="right" side="right" defaultWidth={300} minWidth={220} maxWidth={520}>
         <Properties />
         <Comments />
-      </aside>
+      </SidePanel>
     </div>
   );
 }

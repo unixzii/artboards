@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { Renderer } from "./canvas/renderer.ts";
 import { ViewerContext } from "./core/context.ts";
 import { Viewer } from "./core/viewer.ts";
-import { App } from "./ui/App.tsx";
+import { App } from "./panels/App.tsx";
 
 // Provided by /canvaskit/canvaskit.js, loaded from index.html.
 declare const CanvasKitInit: (opts: { locateFile(file: string): string }) => Promise<CanvasKit>;

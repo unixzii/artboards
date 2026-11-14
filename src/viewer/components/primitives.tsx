@@ -1,23 +1,6 @@
-// Small presentational pieces shared across the viewer panels and toolbar.
+// Domain-agnostic presentational primitives shared across viewer panels and toolbar.
 
 import type { MouseEvent, ReactNode } from "react";
-
-/** A titled, scrollable block inside a side panel. */
-export function Section(props: { id: string; title: string; count?: string; children: ReactNode }) {
-  return (
-    <>
-      <h2>
-        {props.title}{" "}
-        <span id={`${props.id}-count`} className="count">
-          {props.count}
-        </span>
-      </h2>
-      <div id={props.id} className="scroll">
-        {props.children}
-      </div>
-    </>
-  );
-}
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
@@ -47,7 +30,7 @@ export function LinkButton(props: { onClick: () => void; title?: string; childre
     props.onClick();
   };
   return (
-    <button className="link" title={props.title} onClick={click}>
+    <button type="button" className="link" title={props.title} onClick={click}>
       {props.children}
     </button>
   );
@@ -63,7 +46,7 @@ export function ButtonGroup({ label, children }: { label?: string; children: Rea
 
 export function GroupButton(props: { id?: string; title: string; active?: boolean; onClick: () => void; children: ReactNode }) {
   return (
-    <button id={props.id} title={props.title} className={props.active ? "on" : undefined} aria-pressed={props.active} onClick={props.onClick}>
+    <button type="button" id={props.id} title={props.title} className={props.active ? "on" : undefined} aria-pressed={props.active} onClick={props.onClick}>
       {props.children}
     </button>
   );

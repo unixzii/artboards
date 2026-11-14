@@ -2,6 +2,7 @@
 // the comment box). Overlay elements are anchored to canvas points with CSS
 // variables, so they follow pan and zoom without React re-rendering.
 
+import { Component, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useViewer, useViewerState } from "../core/context.ts";
 import { describe, pinPosition, type ViewFrame } from "../core/model.ts";
@@ -16,7 +17,10 @@ function FrameLabel({ frame }: { frame: ViewFrame }) {
     // Fills the placeholder box the renderer draws for a failed artboard.
     return (
       <div className="anchored frame-label failed" style={anchor(frame, { w: frame.w, h: frame.h })}>
-        ⚠ {frame.name}
+        <span className="failed-head">
+          <TriangleAlert size={13} />
+          <span>{frame.name}</span>
+        </span>
         <span className="err">
           {error.source} {error.message}
         </span>
@@ -87,7 +91,11 @@ function CommentBox() {
     // Pointer and wheel events stay in the box instead of panning the canvas.
     <div className="anchored popover" style={anchor(draft.at)} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
       <div className="target">
-        {node.frame.name} · {node.component ? `❖ ${node.component.name}` : node.type} {describe(node)}
+        <span>{node.frame.name} · </span>
+        {node.component && <Component size={11} className="target-icon" />}
+        <span>
+          {node.component ? node.component.name : node.type} {describe(node)}
+        </span>
       </div>
       <textarea ref={input} placeholder="What should change?" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown} />
       <div className="actions">
