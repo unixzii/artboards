@@ -30,11 +30,9 @@ export function Toolbar() {
       <ButtonGroup label="Tool">
         <GroupButton id="tool-select" title="Select and pan (V)" active={tool === "select"} onClick={() => viewer.setTool("select")}>
           <MousePointer2 size={13} />
-          <span>Select</span>
         </GroupButton>
         <GroupButton id="tool-comment" title="Add a comment (C)" active={tool === "comment"} onClick={() => viewer.setTool("comment")}>
           <MessageSquarePlus size={13} />
-          <span>Comment</span>
         </GroupButton>
       </ButtonGroup>
       <span className="spacer" />

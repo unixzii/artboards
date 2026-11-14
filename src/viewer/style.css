@@ -51,7 +51,7 @@ body {
 body[data-resizing] { user-select: none; }
 body[data-resizing="vertical"] * { cursor: col-resize !important; }
 body[data-resizing="horizontal"] * { cursor: row-resize !important; }
-button { font: inherit; color: inherit; }
+button { font: inherit; color: inherit; user-select: none; }
 svg.lucide { flex: none; display: block; }
 
 #app {
@@ -80,6 +80,7 @@ svg.lucide { flex: none; display: block; }
 #status.warn > svg { color: var(--warn); }
 #status.bad { color: var(--error); }
 #status.bad > svg { color: var(--error); }
+#zoom { font-family: ui-monospace, Menlo, monospace; width: 50px; }
 .group { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex: none; }
 .group button {
   display: inline-flex;
@@ -171,8 +172,8 @@ svg.lucide { flex: none; display: block; }
 .layer {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 26px;
+  gap: 8px;
+  height: 30px;
   margin: 0 6px;
   padding: 0 8px 0 6px;
   border-radius: 6px;
