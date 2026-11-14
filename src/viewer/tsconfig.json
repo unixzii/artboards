@@ -1,0 +1,11 @@
+{
+  // Browser side. No Node types, so importing anything outside lib/shared
+  // (which would drag in node:fs and friends) fails the type check.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["."]
+}

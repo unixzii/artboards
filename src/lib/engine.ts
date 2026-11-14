@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { CanvasKit } from "canvaskit-wasm";
 import { FontSet } from "./fonts.ts";
-import type { TextEngine } from "./text.ts";
+import type { TextEngine } from "./shared/text.ts";
 
 const require = createRequire(import.meta.url);
 

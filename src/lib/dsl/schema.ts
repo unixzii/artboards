@@ -245,7 +245,7 @@ const HOOKS = "useState, useEffect, useMemo, useRef, useCallback, Fragment";
 
 export function generateDts(): string {
   const out: string[] = [
-    "// Generated from src/schema.ts by `artboards types`. Do not edit.",
+    "// Generated from src/lib/dsl/schema.ts by `artboards types`. Do not edit.",
     "",
     'declare module "artboards" {',
     '  import type { ReactNode } from "react";',

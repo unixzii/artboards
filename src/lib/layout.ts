@@ -18,9 +18,9 @@ import {
   TaffyTree,
   loadTaffy,
 } from "taffy-layout";
-import type { Padding } from "./dsl.ts";
-import { layerChildren, type SceneNode } from "./scene.ts";
-import { measureText, type TextEngine } from "./text.ts";
+import type { Padding } from "./dsl/elements.ts";
+import { layerChildren, type SceneNode } from "./shared/scene.ts";
+import { measureText, type TextEngine } from "./shared/text.ts";
 
 type ParentKind = "row" | "column" | "free";
 

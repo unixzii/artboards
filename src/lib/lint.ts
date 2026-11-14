@@ -3,20 +3,11 @@
 
 import { relative, resolve } from "node:path";
 import { buildFrame, listFrames, type BuiltFrame } from "./pipeline.ts";
-import { nodePath, sourceOf, walk, type SceneNode } from "./scene.ts";
-import { DslError } from "./schema.ts";
-import { naturalTextHeight } from "./text.ts";
+import { nodePath, sourceOf, walk, type SceneNode } from "./shared/scene.ts";
+import { DslError } from "./dsl/schema.ts";
+import type { Diagnostic } from "./shared/protocol.ts";
+import { naturalTextHeight } from "./shared/text.ts";
 import { typecheck } from "./typecheck.ts";
-
-export interface Diagnostic {
-  severity: "error" | "warning";
-  rule: string;
-  message: string;
-  source?: string;
-  frame?: string;
-  /** Layer path within the artboard (see nodePath), when the problem is on a layer. */
-  node?: string;
-}
 
 const label = (n: SceneNode) => `<${n.type}${n.props.name ? ` "${n.props.name}"` : ""}>`;
 

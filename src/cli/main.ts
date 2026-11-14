@@ -2,15 +2,16 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { formatTree, toJson } from "./inspect.ts";
-import { checkFrame, errorToDiagnostic, formatDiagnostic, lintFile, type Diagnostic } from "./lint.ts";
-import { renderToPng } from "./paint.ts";
-import { buildFrame, listFrames, pickFrames } from "./pipeline.ts";
-import { commentsPath, updateComment } from "./comments.ts";
-import { generateDocs } from "./schema.ts";
-import { buildScene } from "./serialize.ts";
-import { startDevServer } from "./server.ts";
-import { ensureTypes } from "./typecheck.ts";
+import { formatTree, toJson } from "../lib/inspect.ts";
+import { checkFrame, errorToDiagnostic, formatDiagnostic, lintFile } from "../lib/lint.ts";
+import type { Diagnostic } from "../lib/shared/protocol.ts";
+import { renderToPng } from "../lib/shared/paint.ts";
+import { buildFrame, listFrames, pickFrames } from "../lib/pipeline.ts";
+import { commentsPath, updateComment } from "../lib/comments.ts";
+import { generateDocs } from "../lib/dsl/schema.ts";
+import { buildScene } from "../lib/serialize.ts";
+import { startDevServer } from "./dev-server.ts";
+import { ensureTypes } from "../lib/typecheck.ts";
 
 const USAGE = `Usage:
   artboards lint    <file> [--json]                              type-check, render and check every artboard

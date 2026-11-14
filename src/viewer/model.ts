@@ -1,9 +1,8 @@
 // View model: the server's scene turned into linked nodes placed on the
 // canvas, plus the geometry queries on it. No rendering, no DOM.
 
-import type { ResolvedComment } from "../src/comments.ts";
-import type { SceneNode } from "../src/scene.ts";
-import type { FramePayload, ScenePayload, SerializedNode } from "../src/serialize.ts";
+import type { SceneNode } from "../lib/shared/scene.ts";
+import type { FramePayload, ResolvedComment, ScenePayload, SerializedNode } from "../lib/shared/protocol.ts";
 
 export interface ViewNode extends SceneNode {
   /** "<artboard>/<path>", stable across rebuilds. */

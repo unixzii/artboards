@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import React from "react";
 import { transform } from "sucrase";
-import * as dsl from "./dsl.ts";
+import * as dsl from "./elements.ts";
 import * as jsxRuntime from "./jsx-runtime.ts";
 import { unknownExport } from "./schema.ts";
 

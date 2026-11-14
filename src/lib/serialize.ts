@@ -1,35 +1,11 @@
 // Builds the payload the viewer draws from: laid-out trees, diagnostics,
 // the font files they need, and review comments matched to current layers.
 
-import { readComments, resolveComment, type ResolvedComment } from "./comments.ts";
+import { readComments, resolveComment } from "./comments.ts";
 import { createTextEngine } from "./engine.ts";
-import type { FontFace } from "./fonts.ts";
-import { analyzeFile, type Diagnostic } from "./lint.ts";
-import { layerChildren, textContentOf, type Box, type SceneNode } from "./scene.ts";
-
-export interface SerializedNode {
-  type: string;
-  /** Props as written, minus children. For Text, `children` is the text. */
-  props: Record<string, any>;
-  layout: Box;
-  fontFamilies?: string[];
-  children: SerializedNode[];
-}
-
-export interface FramePayload {
-  name: string;
-  /** Null when the artboard failed to build; see `error`. */
-  root: SerializedNode | null;
-  error?: Diagnostic;
-}
-
-export interface ScenePayload {
-  file: string;
-  frames: FramePayload[];
-  diagnostics: Diagnostic[];
-  fonts: FontFace[];
-  comments: ResolvedComment[];
-}
+import { analyzeFile } from "./lint.ts";
+import type { ResolvedComment, ScenePayload, SerializedNode } from "./shared/protocol.ts";
+import { layerChildren, textContentOf, type SceneNode } from "./shared/scene.ts";
 
 function serialize(n: SceneNode): SerializedNode {
   const { children: _children, ...props } = n.props;

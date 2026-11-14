@@ -2,9 +2,7 @@
 // place where the two are kept in step. Components and input handlers call it.
 
 import type { CanvasKit } from "canvaskit-wasm";
-import type { ResolvedComment } from "../src/comments.ts";
-import type { Diagnostic } from "../src/lint.ts";
-import type { ScenePayload } from "../src/serialize.ts";
+import type { Diagnostic, ResolvedComment, ScenePayload } from "../lib/shared/protocol.ts";
 import * as api from "./api.ts";
 import { buildModel, describe, EMPTY_MODEL, nodeKey, type Model, type Point, type ViewNode } from "./model.ts";
 import { Renderer, type RendererElements } from "./renderer.ts";

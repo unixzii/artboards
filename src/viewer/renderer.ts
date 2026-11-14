@@ -3,9 +3,9 @@
 // stays out of React; the DOM overlay follows through three CSS variables.
 
 import type { Canvas, CanvasKit, Paint, SkPicture, Surface } from "canvaskit-wasm";
-import type { FontFace } from "../src/fonts.ts";
-import { paintNode } from "../src/paint.ts";
-import { BASE_FAMILY, releaseParagraphs, type TextEngine } from "../src/text.ts";
+import type { FontFace } from "../lib/shared/protocol.ts";
+import { paintNode } from "../lib/shared/paint.ts";
+import { BASE_FAMILY, releaseParagraphs, type TextEngine } from "../lib/shared/text.ts";
 import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewNode } from "./model.ts";
 
 export interface RendererElements {

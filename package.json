@@ -4,16 +4,16 @@
   "type": "module",
   "version": "0.0.0",
   "bin": {
-    "artboards": "./src/cli.ts"
+    "artboards": "./src/cli/main.ts"
   },
   "scripts": {
-    "lint": "node src/cli.ts lint",
-    "render": "node src/cli.ts render",
-    "inspect": "node src/cli.ts inspect",
-    "docs": "node src/cli.ts docs",
-    "typecheck": "tsc --noEmit",
-    "dev": "node src/cli.ts dev",
-    "comments": "node src/cli.ts comments"
+    "lint": "node src/cli/main.ts lint",
+    "render": "node src/cli/main.ts render",
+    "inspect": "node src/cli/main.ts inspect",
+    "docs": "node src/cli/main.ts docs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p src/viewer",
+    "dev": "node src/cli/main.ts dev",
+    "comments": "node src/cli/main.ts comments"
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",

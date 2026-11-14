@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Reconciler from "react-reconciler";
 import { DefaultEventPriority } from "react-reconciler/constants.js";
 import { DslError, validateProps } from "./schema.ts";
-import { createNode, type SceneNode } from "./scene.ts";
+import { createNode, type SceneNode } from "../shared/scene.ts";
 
 function append(parent: SceneNode, child: SceneNode) {
   detach(child);

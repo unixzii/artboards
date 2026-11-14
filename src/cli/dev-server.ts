@@ -6,10 +6,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { addComment, commentsPath, updateComment } from "./comments.ts";
-import { canvasKitDir } from "./engine.ts";
-import { fontDir } from "./fonts.ts";
-import { buildScene, type ScenePayload } from "./serialize.ts";
+import { addComment, commentsPath, updateComment } from "../lib/comments.ts";
+import { canvasKitDir } from "../lib/engine.ts";
+import { fontDir } from "../lib/fonts.ts";
+import { buildScene } from "../lib/serialize.ts";
+import type { ScenePayload } from "../lib/shared/protocol.ts";
 
 const viewerDir = fileURLToPath(new URL("../viewer/", import.meta.url));
 

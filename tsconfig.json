@@ -1,25 +1,16 @@
 {
+  // Node side: the CLI and the engine. No DOM types, so browser globals are errors here.
   "compilerOptions": {
     "target": "esnext",
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "lib": [
-      "esnext",
-      "dom",
-      "dom.iterable"
-    ],
+    "lib": ["esnext"],
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true,
-    "types": [
-      "node"
-    ],
-    "jsx": "react-jsx"
+    "types": ["node"]
   },
-  "include": [
-    "src",
-    "viewer"
-  ]
+  "include": ["src/cli", "src/lib"]
 }

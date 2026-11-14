@@ -1,4 +1,4 @@
-import type { Diagnostic } from "../../src/lint.ts";
+import type { Diagnostic } from "../../lib/shared/protocol.ts";
 import { nodeKey } from "../model.ts";
 import { useViewer, useViewerState } from "./context.ts";
 import { Empty, ListItem, Section } from "./ui.tsx";

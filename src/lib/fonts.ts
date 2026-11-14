@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { TypefaceFontProvider } from "canvaskit-wasm";
-import { BASE_FAMILY, type FontResolver } from "./text.ts";
+import type { FontFace } from "./shared/protocol.ts";
+import { BASE_FAMILY, type FontResolver } from "./shared/text.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -69,12 +70,6 @@ function subsetFor(cp: number): Subset | null {
   hit = loadSubsets().find((s) => s.ranges.some(([lo, hi]) => cp >= lo && cp <= hi)) ?? null;
   subsetOfCodePoint.set(cp, hit);
   return hit;
-}
-
-export interface FontFace {
-  family: string;
-  /** Path under the dev server's /fonts/ route: "<pack>/<file>". */
-  path: string;
 }
 
 export class FontSet implements FontResolver {

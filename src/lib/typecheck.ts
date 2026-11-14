@@ -6,13 +6,13 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Diagnostic } from "./lint.ts";
-import { generateDts } from "./schema.ts";
+import type { Diagnostic } from "./shared/protocol.ts";
+import { generateDts } from "./dsl/schema.ts";
 
 const require = createRequire(import.meta.url);
 
 // Lives inside the package so its `import "react"` resolves to our @types/react.
-export const DTS_PATH = fileURLToPath(new URL("../types/artboards.d.ts", import.meta.url));
+export const DTS_PATH = fileURLToPath(new URL("../../types/artboards.d.ts", import.meta.url));
 
 /** Writes the declaration file if it is missing or out of date. */
 export function ensureTypes(): string {

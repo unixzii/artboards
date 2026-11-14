@@ -1,6 +1,6 @@
 // Dev server endpoints.
 
-import type { ScenePayload } from "../src/serialize.ts";
+import type { NewComment, ScenePayload } from "../lib/shared/protocol.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 
@@ -13,15 +13,6 @@ export function subscribeScenes(onScene: (scene: ScenePayload) => void): () => v
   const events = new EventSource("/api/events");
   events.addEventListener("scene", (e) => onScene(JSON.parse((e as MessageEvent).data)));
   return () => events.close();
-}
-
-export interface NewComment {
-  frame: string;
-  path: string;
-  nodeType: string;
-  hint: string;
-  point: { x: number; y: number };
-  text: string;
 }
 
 // Each of these triggers a rebuild on the server; the result arrives as a scene event.

@@ -1,6 +1,6 @@
 // Text/JSON views of a laid-out tree.
 
-import { sourceOf, textContentOf, walk, type SceneNode } from "./scene.ts";
+import { sourceOf, textContentOf, walk, type SceneNode } from "./shared/scene.ts";
 
 export function formatTree(root: SceneNode): string {
   const lines: string[] = [];

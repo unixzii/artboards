@@ -1,4 +1,4 @@
-import type { ResolvedComment } from "../../src/comments.ts";
+import type { ResolvedComment } from "../../lib/shared/protocol.ts";
 import { useViewer, useViewerState } from "./context.ts";
 import { CommentNumber, Empty, LinkButton, ListItem, Section } from "./ui.tsx";
 

@@ -2,12 +2,12 @@
 
 import { createElement, type ComponentType } from "react";
 import { layoutTree } from "./layout.ts";
-import { loadModule } from "./loader.ts";
-import { createSceneRoot } from "./reconciler.ts";
-import type { SceneNode } from "./scene.ts";
-import { DslError } from "./schema.ts";
+import { loadModule } from "./dsl/loader.ts";
+import { createSceneRoot } from "./dsl/reconciler.ts";
+import type { SceneNode } from "./shared/scene.ts";
+import { DslError } from "./dsl/schema.ts";
 import { createTextEngine, type NodeEngine } from "./engine.ts";
-import { releaseParagraphs } from "./text.ts";
+import { releaseParagraphs } from "./shared/text.ts";
 
 export interface FrameEntry {
   /** Component name, falling back to the export name. */
