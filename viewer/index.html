@@ -7,40 +7,7 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <div id="app">
-      <header id="bar">
-        <strong id="file">Artboards</strong>
-        <div class="group" role="group" aria-label="Tool">
-          <button id="tool-select" class="on" title="Select and pan (V)">Select</button>
-          <button id="tool-comment" title="Add a comment (C)">Comment</button>
-        </div>
-        <span class="spacer"></span>
-        <span id="status"></span>
-        <div class="group">
-          <button id="zoom-out" title="Zoom out">−</button>
-          <button id="zoom" title="Reset to 100% (0)">100%</button>
-          <button id="zoom-in" title="Zoom in">+</button>
-          <button id="fit" title="Fit all artboards (Shift+1)">Fit</button>
-        </div>
-      </header>
-      <aside id="left">
-        <h2>Layers</h2>
-        <div id="layers" class="scroll"></div>
-        <h2>Problems <span id="problem-count" class="count"></span></h2>
-        <div id="problems" class="scroll"></div>
-      </aside>
-      <main id="stage">
-        <canvas id="canvas"></canvas>
-        <div id="overlay"></div>
-        <div id="boot">Loading renderer…</div>
-      </main>
-      <aside id="right">
-        <h2>Properties</h2>
-        <div id="props" class="scroll"></div>
-        <h2>Comments <span id="comment-count" class="count"></span></h2>
-        <div id="comments" class="scroll"></div>
-      </aside>
-    </div>
+    <div id="root"><div id="boot">Loading renderer…</div></div>
     <script src="/canvaskit/canvaskit.js"></script>
     <script type="module" src="/client.js"></script>
   </body>

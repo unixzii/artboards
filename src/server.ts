@@ -23,10 +23,12 @@ const TYPES: Record<string, string> = {
 
 async function bundleViewer(): Promise<string> {
   const result = await build({
-    entryPoints: [join(viewerDir, "main.ts")],
+    entryPoints: [join(viewerDir, "main.tsx")],
     bundle: true,
     format: "esm",
     target: "es2022",
+    jsx: "automatic",
+    define: { "process.env.NODE_ENV": '"production"' },
     write: false,
     sourcemap: "inline",
     logLevel: "silent",
@@ -69,7 +71,7 @@ export interface DevServerOptions {
 
 export async function startDevServer({ file, port, host }: DevServerOptions): Promise<string> {
   file = resolve(file);
-  const client = await bundleViewer();
+  await bundleViewer(); // fail at startup, not on first request, if the viewer does not build
   const streams = new Set<ServerResponse>();
   let scene: ScenePayload | undefined;
   let building: Promise<void> | undefined;
@@ -115,7 +117,8 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
       if (req.method === "GET") {
         if (path === "/") return sendFile(res, join(viewerDir, "index.html"));
         if (path === "/style.css") return sendFile(res, join(viewerDir, "style.css"));
-        if (path === "/client.js") return send(res, 200, client, TYPES[".js"]);
+        // Bundled per request (tens of ms) so viewer edits show up on reload.
+        if (path === "/client.js") return send(res, 200, await bundleViewer(), TYPES[".js"]);
         if (path === "/api/scene") return send(res, 200, scene ?? {});
         if (path === "/api/events") {
           res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });

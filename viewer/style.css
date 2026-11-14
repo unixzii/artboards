@@ -28,7 +28,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; overscroll-behavior: none; }
+html, body, #root { height: 100%; margin: 0; overscroll-behavior: none; }
 body {
   font: 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
   color: var(--text);
@@ -159,15 +159,21 @@ aside h2:first-child { border-top: 0; }
 #stage.panning { cursor: grabbing; }
 #stage.commenting { cursor: crosshair; }
 #canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-#overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+#overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; --s: 1; --tx: 0; --ty: 0; }
+
+/* Pinned to canvas point (--x, --y). The renderer updates --s/--tx/--ty on
+   #overlay every frame; --shift is an extra screen-space offset. */
+.anchored {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(calc(var(--tx) * 1px + var(--s) * var(--x) * 1px), calc(var(--ty) * 1px + var(--s) * var(--y) * 1px))
+    var(--shift, translate(0, 0));
+}
 #boot { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
 #boot[hidden] { display: none; }
 
 .frame-label {
-  position: absolute;
-  left: 0;
-  top: 0;
-  transform-origin: 0 100%;
   padding-bottom: 6px;
   color: var(--muted);
   white-space: nowrap;
@@ -176,12 +182,10 @@ aside h2:first-child { border-top: 0; }
   max-width: 640px;
 }
 .frame-label:hover, .frame-label.selected { color: var(--accent); }
-.frame-label.failed { max-width: none; padding: 8px 10px; overflow: hidden; color: var(--error); cursor: default; }
+.frame-label.above { --shift: translateY(-100%); }
+.frame-label.failed { width: calc(var(--s) * var(--w) * 1px); height: calc(var(--s) * var(--h) * 1px); max-width: none; padding: 8px 10px; overflow: hidden; color: var(--error); cursor: default; }
 .frame-label .err { display: block; margin-top: 6px; white-space: normal; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 .pin {
-  position: absolute;
-  left: 0;
-  top: 0;
   margin: -22px 0 0 0;
   width: 22px;
   height: 22px;
@@ -199,7 +203,7 @@ aside h2:first-child { border-top: 0; }
 }
 .pin.detached { background: #a1a1aa; border-style: dashed; }
 .popover {
-  position: absolute;
+  --shift: translate(8px, 8px);
   width: 260px;
   padding: 10px;
   border: 1px solid var(--line);
