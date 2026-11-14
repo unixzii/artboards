@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { assetPath } from "../engine/assets.ts";
 import { fontDir } from "../engine/fonts.ts";
 import { canvasKitDir } from "../engine/skia.ts";
 import type { ScenePayload } from "../shared/protocol.ts";
@@ -20,6 +21,13 @@ const TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".wasm": "application/wasm",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
 };
 
 async function bundleViewer(): Promise<string> {
@@ -45,7 +53,7 @@ function send(res: ServerResponse, status: number, body: string | object, type =
 
 function sendFile(res: ServerResponse, path: string, immutable = false) {
   if (!existsSync(path)) return send(res, 404, "not found");
-  const ext = path.slice(path.lastIndexOf("."));
+  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
   res.writeHead(200, {
     "content-type": TYPES[ext] ?? "application/octet-stream",
     "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-store",
@@ -106,7 +114,7 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
   const comments = basename(commentsPath(file));
   watch(dirname(file), { recursive: true }, (_event, name) => {
     if (!name || name.includes("node_modules")) return;
-    if (!/\.(jsx|tsx|ts|js)$/.test(name) && basename(name) !== comments) return;
+    if (!/\.(jsx|tsx|ts|js|png|jpe?g|webp|gif|woff2|ttf|otf)$/i.test(name) && basename(name) !== comments) return;
     clearTimeout(timer);
     timer = setTimeout(rebuild, 60);
   });
@@ -133,6 +141,10 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
         m = /^\/fonts\/([a-z0-9-]+)\/([a-z0-9-]+\.woff2)$/.exec(path);
         const dir = m && fontDir(m[1]);
         if (m && dir) return sendFile(res, join(dir, m[2]), true);
+        // Only files the current design imported are registered, so only those are served.
+        m = /^\/assets\/([0-9a-f]{16})$/.exec(path);
+        const asset = m && assetPath(m[1]);
+        if (asset) return sendFile(res, asset, true);
         return send(res, 404, "not found");
       }
 

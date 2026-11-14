@@ -2,9 +2,11 @@
 // surface, and the viewport transform. Runs every frame while panning, so it
 // stays out of React; the DOM overlay follows through three CSS variables.
 
-import type { Canvas, CanvasKit, Paint, SkPicture, Surface } from "canvaskit-wasm";
+import type { Canvas, CanvasKit, Image, Paint, SkPicture, Surface } from "canvaskit-wasm";
+import type { RenderEngine } from "../../shared/engine.ts";
 import { paintNode } from "../../shared/paint.ts";
-import { BASE_FAMILY, releaseParagraphs, type FontFace, type TextEngine } from "../../shared/text.ts";
+import type { AssetEntry } from "../../shared/protocol.ts";
+import { BASE_FAMILY, releaseParagraphs } from "../../shared/text.ts";
 import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewNode } from "../core/model.ts";
 import type { StageBackend, StageElements } from "../core/viewer.ts";
 
@@ -14,10 +16,11 @@ const MAX_ZOOM = 64;
 export class Renderer implements StageBackend {
   private ck: CanvasKit;
   private els: StageElements;
-  private engine: TextEngine;
+  private engine: RenderEngine;
   private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint };
   private surface: Surface | null = null;
-  private fontLoads = new Map<string, Promise<void>>();
+  private loads = new Map<string, Promise<void>>();
+  private images = new Map<string, Image | null>();
   private pictures = new Map<string, SkPicture>();
   private model: Model = EMPTY_MODEL;
   private selected: ViewNode | null = null;
@@ -39,6 +42,7 @@ export class Renderer implements StageBackend {
         // Nodes arrive with their families already resolved by the server.
         resolve: () => ({ families: [BASE_FAMILY], missing: [] }),
       },
+      images: { get: (id) => this.images.get(id) ?? null },
     };
     const stroke = (r: number, g: number, b: number, a = 1) => {
       const p = new ck.Paint();
@@ -74,16 +78,20 @@ export class Renderer implements StageBackend {
 
   // ------------------------------------------------------------------ content
 
-  /** Fetches and registers font files not seen before. Await before setModel. */
-  loadFonts(faces: FontFace[]): Promise<unknown> {
+  /** Fetches and registers fonts and images not seen before. Await before setModel. */
+  loadAssets(assets: AssetEntry[]): Promise<unknown> {
     return Promise.all(
-      faces.map((face) => {
-        let load = this.fontLoads.get(face.path);
+      assets.map((asset) => {
+        let load = this.loads.get(asset.url);
         if (!load) {
-          load = fetch(`/fonts/${face.path}`)
-            .then((r) => r.arrayBuffer())
-            .then((bytes) => this.engine.fonts.provider.registerFont(bytes, face.family));
-          this.fontLoads.set(face.path, load);
+          load = fetch(asset.url)
+            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status} ${asset.url}`))))
+            .then((bytes) => {
+              if (asset.kind === "font") this.engine.fonts.provider.registerFont(bytes, asset.family);
+              else this.images.set(asset.id, this.ck.MakeImageFromEncoded(bytes));
+            })
+            .catch((e) => console.warn("asset failed to load:", e));
+          this.loads.set(asset.url, load);
         }
         return load;
       }),
@@ -201,9 +209,12 @@ export class Renderer implements StageBackend {
 
   private outline(canvas: Canvas, node: ViewNode, paint: Paint, width: number) {
     paint.setStrokeWidth(width / this.view.s);
-    const x = node.frame.x + node.abs.x;
-    const y = node.frame.y + node.abs.y;
-    canvas.drawRect(this.ck.LTRBRect(x, y, x + node.layout.width, y + node.layout.height), paint);
+    const [a, b, c, d, e, f] = node.matrix;
+    canvas.save();
+    canvas.translate(node.frame.x, node.frame.y);
+    canvas.concat([a, c, e, b, d, f, 0, 0, 1]);
+    canvas.drawRect(this.ck.LTRBRect(0, 0, node.layout.width, node.layout.height), paint);
+    canvas.restore();
   }
 
   private draw() {

@@ -4,14 +4,16 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import type { CanvasKit } from "canvaskit-wasm";
 import { paintNode } from "../shared/paint.ts";
+import type { RenderEngine } from "../shared/engine.ts";
 import type { PaintableNode } from "../shared/scene.ts";
-import type { TextEngine } from "../shared/text.ts";
+import { NodeImages } from "./assets.ts";
 import { FontSet } from "./fonts.ts";
 
 const require = createRequire(import.meta.url);
 
-export interface NodeEngine extends TextEngine {
+export interface NodeEngine extends RenderEngine {
   fonts: FontSet;
+  images: NodeImages;
 }
 
 /** Directory with canvaskit.js / canvaskit.wasm, also served to the viewer. */
@@ -19,16 +21,16 @@ export const canvasKitDir = dirname(require.resolve("canvaskit-wasm"));
 
 let engine: Promise<NodeEngine> | undefined;
 
-export function createTextEngine(): Promise<NodeEngine> {
+export function createEngine(): Promise<NodeEngine> {
   return (engine ??= (async () => {
     const init = require("canvaskit-wasm") as (opts: object) => Promise<CanvasKit>;
     const ck = await init({ locateFile: (f: string) => join(canvasKitDir, f) });
-    return { ck, fonts: new FontSet(ck.TypefaceFontProvider.Make()) };
+    return { ck, fonts: new FontSet(ck), images: new NodeImages(ck) };
   })());
 }
 
 /** Rasterizes one artboard on the CPU and returns PNG bytes. */
-export function renderToPng(engine: TextEngine, root: PaintableNode, scale = 1): Uint8Array {
+export function renderToPng(engine: RenderEngine, root: PaintableNode, scale = 1): Uint8Array {
   const { ck } = engine;
   const width = Math.ceil(root.layout.width * scale);
   const height = Math.ceil(root.layout.height * scale);

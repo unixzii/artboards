@@ -9,8 +9,10 @@ export interface ViewNode extends PaintableNode {
   key: string;
   path: string;
   frame: ViewFrame;
-  /** Top-left within the artboard. */
+  /** Top-left within the artboard, ignoring rotation. */
   abs: Point;
+  /** Local -> artboard affine transform `[a, b, c, d, e, f]` (x' = a·x + c·y + e, y' = b·x + d·y + f), rotation included. */
+  matrix: Affine;
   children: ViewNode[];
   parent: ViewNode | null;
 }
@@ -37,6 +39,43 @@ export interface Point {
   y: number;
 }
 
+export type Affine = [number, number, number, number, number, number];
+
+const IDENTITY: Affine = [1, 0, 0, 1, 0, 0];
+
+function multiply([a1, b1, c1, d1, e1, f1]: Affine, [a2, b2, c2, d2, e2, f2]: Affine): Affine {
+  return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1];
+}
+
+/** Placement of a node inside its parent: offset, then rotation about its centre. */
+function placement(layout: { x: number; y: number; width: number; height: number }, rotation: unknown): Affine {
+  const move: Affine = [1, 0, 0, 1, layout.x, layout.y];
+  if (typeof rotation !== "number" || !rotation) return move;
+  const r = (rotation * Math.PI) / 180;
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  const cx = layout.width / 2;
+  const cy = layout.height / 2;
+  return multiply(move, [cos, sin, -sin, cos, cx - cos * cx + sin * cy, cy - sin * cx - cos * cy]);
+}
+
+/** A point in the parent's coordinates -> the node's own (unrotated) coordinates. */
+function toLocal(n: { layout: { x: number; y: number; width: number; height: number }; props: Record<string, any> }, px: number, py: number): Point {
+  let lx = px - n.layout.x;
+  let ly = py - n.layout.y;
+  const rotation = n.props.rotation;
+  if (typeof rotation === "number" && rotation) {
+    const r = (-rotation * Math.PI) / 180;
+    const cx = n.layout.width / 2;
+    const cy = n.layout.height / 2;
+    const dx = lx - cx;
+    const dy = ly - cy;
+    lx = cx + dx * Math.cos(r) - dy * Math.sin(r);
+    ly = cy + dx * Math.sin(r) + dy * Math.cos(r);
+  }
+  return { x: lx, y: ly };
+}
+
 export const EMPTY_MODEL: Model = { frames: [], nodes: new Map() };
 
 export const nodeKey = (frame: string, path: string) => `${frame}/${path}`;
@@ -58,12 +97,14 @@ function hydrate(s: SerializedNode, frame: ViewFrame, path: string, parent: View
     layout,
     component: s.component,
     fontFamilies: s.fontFamilies,
+    runs: s.runs,
     children: [],
     parent,
     key: nodeKey(frame.name, path),
     path,
     frame,
     abs: { x: (parent?.abs.x ?? 0) + layout.x, y: (parent?.abs.y ?? 0) + layout.y },
+    matrix: multiply(parent?.matrix ?? IDENTITY, placement(layout, s.props.rotation)),
   };
   node.children = s.children.map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes));
   nodes.set(node.key, node);
@@ -103,8 +144,7 @@ export function bounds(frames: ViewFrame[]) {
 }
 
 function hitNode(n: ViewNode, px: number, py: number): ViewNode | null {
-  const lx = px - n.layout.x;
-  const ly = py - n.layout.y;
+  const { x: lx, y: ly } = toLocal(n, px, py);
   const inside = lx >= 0 && ly >= 0 && lx <= n.layout.width && ly <= n.layout.height;
   if (n.props.clip && !inside) return null;
   for (let i = n.children.length - 1; i >= 0; i--) {

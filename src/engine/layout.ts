@@ -1,30 +1,37 @@
-// Maps the DSL's sizing model (fixed / fill / hug) onto Taffy flexbox.
+// Maps the DSL's sizing model (fixed / fill / hug) onto Taffy flexbox and grid.
 //
 //   number  -> fixed size, never shrinks
 //   "hug"   -> size to content, never shrinks (default)
-//   "fill"  -> main axis: grow to take remaining space; cross axis: stretch;
-//              inside a plain Frame: 100% of the parent
+//   "fill"  -> Row/Column main axis: grow (by `grow`, default 1) into remaining space;
+//              cross axis and Grid cells: stretch;
+//              inside a plain Frame or when absolute: 100% of the parent
 //
-// Children of a plain <Frame> are absolutely positioned by x/y.
+// Children of a plain <Frame>, and children marked `absolute`, are positioned
+// by x/y/right/bottom against the parent's outer box and take no space in flow.
 
 import {
+  AlignContent,
   AlignItems,
   AlignSelf,
   Display,
   FlexDirection,
+  FlexWrap,
   JustifyContent,
   Position,
   Style,
   TaffyTree,
   loadTaffy,
+  type GridTemplateComponent,
 } from "taffy-layout";
 import type { CanvasKit } from "canvaskit-wasm";
-import { layerChildren, parseViewBox, type Padding, type PaintableNode, type SceneNode } from "../shared/scene.ts";
-import { measureText, type Constraint, type TextEngine } from "../shared/text.ts";
+import type { RenderEngine } from "../shared/engine.ts";
+import { expandSides, layerChildren, parseViewBox, walk, type PaintableNode, type SceneNode } from "../shared/scene.ts";
+import { measureText, type Constraint } from "../shared/text.ts";
 
-type ParentKind = "row" | "column" | "free";
+type ParentKind = "row" | "column" | "grid" | "free";
 
-const kindOf = (n: SceneNode): ParentKind => (n.type === "Row" ? "row" : n.type === "Column" ? "column" : "free");
+const kindOf = (n: SceneNode): ParentKind =>
+  n.type === "Row" ? "row" : n.type === "Column" ? "column" : n.type === "Grid" ? "grid" : "free";
 
 const ALIGN = {
   start: AlignItems.Start,
@@ -33,25 +40,44 @@ const ALIGN = {
   stretch: AlignItems.Stretch,
 } as const;
 
+const ALIGN_SELF = {
+  start: AlignSelf.Start,
+  center: AlignSelf.Center,
+  end: AlignSelf.End,
+  stretch: AlignSelf.Stretch,
+} as const;
+
 const JUSTIFY = {
   start: JustifyContent.Start,
   center: JustifyContent.Center,
   end: JustifyContent.End,
   "space-between": JustifyContent.SpaceBetween,
+  "space-around": JustifyContent.SpaceAround,
+  "space-evenly": JustifyContent.SpaceEvenly,
 } as const;
 
-function padding(p: Padding | undefined) {
-  if (p == null) return { top: 0, right: 0, bottom: 0, left: 0 };
-  if (typeof p === "number") return { top: p, right: p, bottom: p, left: p };
-  if (p.length === 2) return { top: p[0], right: p[1], bottom: p[0], left: p[1] };
-  return { top: p[0], right: p[1], bottom: p[2], left: p[3] };
+/** `columns` / `rows` of a Grid -> Taffy track list. */
+export function gridTracks(v: unknown): GridTemplateComponent[] {
+  if (typeof v === "number") return Array.from({ length: v }, () => ({ min: 0, max: "1fr" as const }));
+  if (!Array.isArray(v)) return [];
+  return v.map((t): GridTemplateComponent => {
+    if (typeof t === "number") return { min: t, max: t };
+    if (t === "hug") return { min: "auto", max: "auto" };
+    return { min: 0, max: t as `${number}fr` };
+  });
 }
 
-function styleFor(node: SceneNode, parent: ParentKind): Style {
+type Stretched = Map<SceneNode, { width?: number; height?: number }>;
+
+function styleFor(node: SceneNode, parent: ParentKind, stretched?: { width?: number; height?: number }): Style {
   const p = node.props;
   const s = new Style();
-  s.display = Display.Flex;
+  s.display = node.type === "Grid" ? Display.Grid : Display.Flex;
   s.flexShrink = 0;
+  const absolute = parent === "free" || p.absolute === true;
+  const inFlow = !absolute;
+
+  if (inFlow && p.alignSelf) s.alignSelf = ALIGN_SELF[p.alignSelf as keyof typeof ALIGN_SELF];
 
   for (const axis of ["width", "height"] as const) {
     const v = p[axis] ?? "hug";
@@ -59,10 +85,13 @@ function styleFor(node: SceneNode, parent: ParentKind): Style {
       s[axis] = v;
     } else if (v === "fill") {
       const isMain = (parent === "row" && axis === "width") || (parent === "column" && axis === "height");
-      if (parent === "free") {
-        s[axis] = "100%";
+      if (absolute) {
+        // Sized from the parent by layoutTree (see absoluteSizes).
+      } else if (parent === "grid") {
+        if (axis === "width") s.justifySelf = AlignSelf.Stretch;
+        else s.alignSelf = AlignSelf.Stretch;
       } else if (isMain) {
-        s.flexGrow = 1;
+        s.flexGrow = p.grow ?? 1;
         s.flexShrink = 1;
         s.flexBasis = 0;
         if (axis === "width") s.minWidth = 0;
@@ -72,20 +101,44 @@ function styleFor(node: SceneNode, parent: ParentKind): Style {
       }
     }
   }
+  if (p.minWidth != null) s.minWidth = p.minWidth;
+  if (p.maxWidth != null) s.maxWidth = p.maxWidth;
+  if (p.minHeight != null) s.minHeight = p.minHeight;
+  if (p.maxHeight != null) s.maxHeight = p.maxHeight;
 
-  if (parent === "free") {
+  if (absolute) {
+    // Only near-edge insets go to Taffy: it resolves right/bottom against the
+    // wrong box, so layoutTree places those itself (see resolveFarInsets).
     s.position = Position.Absolute;
     s.inset = { left: p.x ?? 0, top: p.y ?? 0, right: "auto", bottom: "auto" };
   }
+  if (stretched?.width != null) s.width = stretched.width;
+  if (stretched?.height != null) s.height = stretched.height;
+
+  if (parent === "grid" && inFlow) {
+    if (p.colSpan > 1) s.gridColumn = { start: "auto", end: { span: p.colSpan } };
+    if (p.rowSpan > 1) s.gridRow = { start: "auto", end: { span: p.rowSpan } };
+  }
 
   const kind = kindOf(node);
-  if (kind !== "free") {
+  const gap = p.gap ?? 0;
+  if (kind === "row" || kind === "column") {
+    const cross = p.crossGap ?? gap;
     s.flexDirection = kind === "row" ? FlexDirection.Row : FlexDirection.Column;
-    s.gap = { width: p.gap ?? 0, height: p.gap ?? 0 };
+    s.flexWrap = p.wrap ? FlexWrap.Wrap : FlexWrap.NoWrap;
+    s.alignContent = AlignContent.Start;
+    s.gap = kind === "row" ? { width: gap, height: cross } : { width: cross, height: gap };
     s.alignItems = ALIGN[(p.align ?? "start") as keyof typeof ALIGN];
     s.justifyContent = JUSTIFY[(p.justify ?? "start") as keyof typeof JUSTIFY];
+  } else if (kind === "grid") {
+    s.gridTemplateColumns = gridTracks(p.columns);
+    if (p.rows != null) s.gridTemplateRows = gridTracks(p.rows);
+    s.gap = { width: p.columnGap ?? gap, height: p.rowGap ?? gap };
+    s.alignItems = ALIGN[(p.align ?? "stretch") as keyof typeof ALIGN];
+    s.justifyItems = ALIGN[(p.justify ?? "stretch") as keyof typeof ALIGN];
   }
-  s.padding = padding(p.padding);
+  const pad = expandSides(p.padding);
+  s.padding = pad;
   return s;
 }
 
@@ -106,25 +159,90 @@ function measurePath(ck: CanvasKit, node: PaintableNode, known: Constraint): { w
   if (b[0] === 0 && b[1] === 0 && b[2] === 0 && b[3] === 0) {
     return { width: known.width ?? 0, height: known.height ?? 0 };
   }
-  const pad = node.props.stroke ? (node.props.strokeWidth ?? 1) / 2 : 0;
+  const pad = node.props.stroke ? (typeof node.props.strokeWidth === "number" ? node.props.strokeWidth : 1) / 2 : 0;
   return {
     width: known.width ?? Math.ceil(Math.max(0, b[2] + pad)),
     height: known.height ?? Math.ceil(Math.max(0, b[3] + pad)),
   };
 }
 
+/** Images keep their aspect ratio; with no size given they are as many px as the file has pixels. */
+function measureImage(engine: RenderEngine, node: PaintableNode, known: Constraint): { width: number; height: number } {
+  if (known.width != null && known.height != null) return { width: known.width, height: known.height };
+  const img = node.props.src ? engine.images.get(node.props.src.id) : null;
+  const iw = img?.width() ?? 0;
+  const ih = img?.height() ?? 0;
+  if (!iw || !ih) return { width: known.width ?? 0, height: known.height ?? 0 };
+  if (known.width != null) return { width: known.width, height: (known.width * ih) / iw };
+  if (known.height != null) return { width: (known.height * iw) / ih, height: known.height };
+  return { width: iw, height: ih };
+}
+
+const LEAVES = new Set(["Text", "Path", "Image"]);
+
 let taffyReady: Promise<unknown> | undefined;
 
+const isAbsolute = (n: SceneNode) => n.props.absolute === true || (n.parent != null && n.parent.type !== "#root" && kindOf(n.parent) === "free");
+
 /** Lays out one artboard (a single root node) and writes `layout` on every node. */
-export async function layoutTree(root: SceneNode, engine: TextEngine) {
+export async function layoutTree(root: SceneNode, engine: RenderEngine) {
   await (taffyReady ??= loadTaffy());
+  // Taffy resolves percentages and right/bottom insets of absolute children
+  // against the wrong box, so sizes that depend on the parent are computed
+  // here from the previous pass. Each pass settles one more level of nesting.
+  const sized: Stretched = new Map();
+  for (let pass = 0; pass < 8; pass++) {
+    computeLayout(root, engine, sized);
+    if (!absoluteSizes(root, sized)) break;
+  }
+  resolveFarInsets(root);
+}
+
+/**
+ * Absolute children with `"fill"`, or pinned to both edges of an axis without a
+ * fixed size, span their parent minus the offsets. Returns whether any changed.
+ */
+function absoluteSizes(root: SceneNode, sized: Stretched): boolean {
+  let changed = false;
+  walk(root, (n) => {
+    if (n === root || !n.parent || !isAbsolute(n)) return;
+    const p = n.props;
+    const span = (axis: "width" | "height", start: unknown, end: unknown) => {
+      const v = p[axis];
+      if (v === "fill" || (start != null && end != null && typeof v !== "number")) {
+        return Math.max(0, n.parent!.layout[axis] - ((start as number) ?? 0) - ((end as number) ?? 0));
+      }
+      return undefined;
+    };
+    const next = { width: span("width", p.x, p.right), height: span("height", p.y, p.bottom) };
+    if (next.width == null && next.height == null) return;
+    const prev = sized.get(n);
+    if (prev?.width !== next.width || prev?.height !== next.height) {
+      sized.set(n, next);
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+/** Places absolute children given by `right`/`bottom` (and no `x`/`y`) against their parent's far edges. */
+function resolveFarInsets(root: SceneNode) {
+  walk(root, (n) => {
+    if (n === root || !n.parent || !isAbsolute(n)) return;
+    const p = n.props;
+    if (p.right != null && p.x == null) n.layout.x = n.parent.layout.width - p.right - n.layout.width;
+    if (p.bottom != null && p.y == null) n.layout.y = n.parent.layout.height - p.bottom - n.layout.height;
+  });
+}
+
+function computeLayout(root: SceneNode, engine: RenderEngine, stretched: Stretched) {
   const tree = new TaffyTree();
   const ids = new Map<SceneNode, bigint>();
 
   const build = (node: SceneNode, parent: ParentKind): bigint => {
-    const style = styleFor(node, parent);
+    const style = styleFor(node, parent, stretched.get(node));
     let id: bigint;
-    if (node.type === "Text" || node.type === "Path") {
+    if (LEAVES.has(node.type)) {
       id = tree.newLeafWithContext(style, node);
     } else {
       const kind = kindOf(node);
@@ -145,6 +263,7 @@ export async function layoutTree(root: SceneNode, engine: TextEngine) {
       style.free();
       if (!context) return { width: 0, height: 0 };
       if (context.type === "Path") return measurePath(engine.ck, context, known);
+      if (context.type === "Image") return measureImage(engine, context, known);
       return measureText(engine, context, known, available);
     },
   );

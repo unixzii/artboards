@@ -113,6 +113,12 @@ function detach(child: SceneNode) {
   child.parent = null;
 }
 
+interface HostContext {
+  inText: boolean;
+  inSpan: boolean;
+  source?: string;
+}
+
 let currentPriority = 0;
 
 const hostConfig: any = {
@@ -121,13 +127,18 @@ const hostConfig: any = {
   supportsHydration: false,
   isPrimaryRenderer: true,
 
-  createInstance(type: string, props: Record<string, any>, _root: SceneNode, _ctx: unknown, fiber: any) {
+  createInstance(type: string, props: Record<string, any>, _root: SceneNode, ctx: HostContext, fiber: any) {
+    if (type === "Span" && !ctx.inText) throw new DslError("<Span> must be inside a <Text>.", props.$source);
+    if (type === "Span" && ctx.inSpan) throw new DslError("<Span> cannot contain another <Span>; put them side by side.", props.$source);
+    if (ctx.inText && type !== "Span") {
+      throw new DslError(`<Text> can only contain text and <Span>, not <${type}>. Put other elements next to the Text in a Row or Column.`, props.$source);
+    }
     validateProps(type, props);
     const node = createNode(type, props);
     node.componentStack = captureComponentStack(fiber);
     return node;
   },
-  createTextInstance(text: string, _root: SceneNode, hostContext: { inText: boolean; source?: string }) {
+  createTextInstance(text: string, _root: SceneNode, hostContext: HostContext) {
     if (!hostContext.inText) {
       if (text.trim() === "") return createNode("#text", {});
       throw new DslError(`Text "${text.trim().slice(0, 40)}" must be wrapped in <Text>`, hostContext.source);
@@ -137,11 +148,14 @@ const hostConfig: any = {
     return node;
   },
   shouldSetTextContent(type: string, props: Record<string, any>) {
-    return type === "Text" && (typeof props.children === "string" || typeof props.children === "number");
+    return (type === "Text" || type === "Span") && (typeof props.children === "string" || typeof props.children === "number");
   },
 
-  getRootHostContext: () => ({ inText: false }),
-  getChildHostContext: (_parent: unknown, type: string, _root: unknown) => ({ inText: type === "Text" }),
+  getRootHostContext: (): HostContext => ({ inText: false, inSpan: false }),
+  getChildHostContext: (_parent: unknown, type: string, _root: unknown): HostContext => ({
+    inText: type === "Text" || type === "Span",
+    inSpan: type === "Span",
+  }),
   getPublicInstance: (instance: SceneNode) => instance,
 
   appendInitialChild: append,

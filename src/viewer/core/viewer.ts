@@ -3,7 +3,7 @@
 
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { ResolvedComment, ScenePayload } from "../../shared/protocol.ts";
-import type { FontFace } from "../../shared/text.ts";
+import type { AssetEntry } from "../../shared/protocol.ts";
 import * as api from "./api.ts";
 import { buildModel, describe, EMPTY_MODEL, nodeKey, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
@@ -39,7 +39,8 @@ export interface StageElements {
 
 /** Imperative stage renderer contract implemented by the CanvasKit surface. */
 export interface StageBackend {
-  loadFonts(faces: FontFace[]): Promise<unknown>;
+  /** Fetches fonts and images not seen before. Await before setModel. */
+  loadAssets(assets: AssetEntry[]): Promise<unknown>;
   setModel(model: Model): void;
   setHighlight(selected: ViewNode | null, hovered: ViewNode | null): void;
   toWorld(screen: Point): Point;
@@ -101,7 +102,7 @@ export class Viewer {
   private async applyScene(scene: ScenePayload) {
     const renderer = this.renderer;
     if (!renderer) return;
-    await renderer.loadFonts(scene.fonts ?? []);
+    await renderer.loadAssets(scene.assets ?? []);
     const model = buildModel(scene);
     renderer.setModel(model);
 

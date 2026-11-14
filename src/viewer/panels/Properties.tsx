@@ -4,6 +4,8 @@ import { Empty, LinkButton } from "../components/primitives.tsx";
 import { Section } from "../components/Section.tsx";
 import { useViewer, useViewerState } from "../core/context.ts";
 import { enclosingComponent, type ViewNode } from "../core/model.ts";
+import { gradientStops } from "../../shared/paint.ts";
+import { isAssetRef, type Gradient } from "../../shared/scene.ts";
 import { LayerIcon } from "./LayerIcon.tsx";
 import { ProblemItem } from "./ProblemItem.tsx";
 
@@ -33,6 +35,21 @@ function ShadowValue({ shadow }: { shadow: Record<string, unknown> }) {
   );
 }
 
+function isGradient(v: unknown): v is Gradient {
+  return typeof v === "object" && v !== null && ((v as Gradient).type === "linear" || (v as Gradient).type === "radial") && Array.isArray((v as Gradient).stops);
+}
+
+/** The same gradient as CSS, for the swatch. */
+function cssGradient(g: Gradient): string {
+  const { colors, positions } = gradientStops(g.stops);
+  const stops = colors.map((c, i) => `${c} ${Math.round(positions[i] * 100)}%`).join(", ");
+  if (g.type === "radial") {
+    const [cx, cy] = g.center ?? [0.5, 0.5];
+    return `radial-gradient(circle at ${cx * 100}% ${cy * 100}%, ${stops})`;
+  }
+  return `linear-gradient(${g.angle ?? 180}deg, ${stops})`;
+}
+
 function PropRow({ name, value }: { name: string; value: unknown }) {
   if (name === "shadow" && typeof value === "object" && value !== null) {
     const list = Array.isArray(value) ? value : [value];
@@ -44,6 +61,25 @@ function PropRow({ name, value }: { name: string; value: unknown }) {
             <ShadowValue key={i} shadow={s as Record<string, unknown>} />
           ))}
         </span>
+      </div>
+    );
+  }
+  if (COLOR_PROPS.has(name) && isGradient(value)) {
+    return (
+      <div className="row">
+        <span className="k">{name}</span>
+        <span className="v">
+          <span className="swatch" style={{ background: cssGradient(value) }} />
+          {value.type} · {value.stops.length} stops
+        </span>
+      </div>
+    );
+  }
+  if (isAssetRef(value)) {
+    return (
+      <div className="row">
+        <span className="k">{name}</span>
+        <span className="v">{value.file}</span>
       </div>
     );
   }

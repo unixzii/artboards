@@ -4,6 +4,8 @@ import {
   Circle,
   Component,
   Frame,
+  Image,
+  LayoutGrid,
   Spline,
   Square,
   StretchHorizontal,
@@ -22,6 +24,10 @@ export function LayerIcon({ node, size = 13 }: { node: ViewNode; size?: number }
       return <StretchVertical size={size} className="layer-icon" />;
     case "Column":
       return <StretchHorizontal size={size} className="layer-icon" />;
+    case "Grid":
+      return <LayoutGrid size={size} className="layer-icon" />;
+    case "Image":
+      return <Image size={size} className="layer-icon" />;
     case "Text":
       return <Type size={size} className="layer-icon" />;
     case "Rect":

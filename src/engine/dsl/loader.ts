@@ -2,9 +2,11 @@
 // NOTE: spike only — this runs the code in-process with no sandbox.
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import React from "react";
 import { transform } from "sucrase";
+import { ASSET_KINDS, importAsset } from "../assets.ts";
+import { resetCustomFonts } from "../fonts.ts";
 import * as dsl from "./elements.ts";
 import * as jsxRuntime from "./jsx-runtime.ts";
 import { unknownExport } from "./schema.ts";
@@ -30,6 +32,8 @@ const EXTENSIONS = ["", ".jsx", ".tsx", ".ts", ".js"];
 export function loadModule(file: string, cache = new Map<string, any>()): Record<string, any> {
   file = resolve(file);
   if (cache.has(file)) return cache.get(file).exports;
+  // A fresh load of the entry file re-declares its fonts.
+  if (cache.size === 0) resetCustomFonts();
 
   const { code } = transform(readFileSync(file, "utf8"), {
     transforms: ["typescript", "jsx", "imports"],
@@ -46,8 +50,16 @@ export function loadModule(file: string, cache = new Map<string, any>()): Record
     if (spec in BUILTINS) return BUILTINS[spec];
     if (spec.startsWith(".")) {
       const base = resolve(dirname(file), spec);
+      if (ASSET_KINDS[extname(base).toLowerCase()]) {
+        if (!existsSync(base)) throw new Error(`${file}: cannot find "${spec}"`);
+        return { __esModule: true, default: importAsset(base) };
+      }
       const found = EXTENSIONS.map((e) => base + e).find((p) => existsSync(p));
-      if (!found) throw new Error(`${file}: cannot resolve import "${spec}"`);
+      if (!found) {
+        const ext = extname(base);
+        const hint = ext && !EXTENSIONS.includes(ext) ? ` Importable files: code (.jsx/.tsx/.ts/.js), images and fonts (${Object.keys(ASSET_KINDS).join(" ")}).` : "";
+        throw new Error(`${file}: cannot resolve import "${spec}".${hint}`);
+      }
       return loadModule(found, cache);
     }
     throw new Error(`${file}: cannot import "${spec}". Only "artboards" and relative files are available.`);

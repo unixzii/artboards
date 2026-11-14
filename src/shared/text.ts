@@ -1,9 +1,9 @@
 // Paragraph building and measurement. Platform-free: runs in Node and the browser.
 
 import type { CanvasKit, Paragraph, TypefaceFontProvider } from "canvaskit-wasm";
-import { textContentOf, type PaintableNode } from "./scene.ts";
+import { textRunsOf, type PaintableNode } from "./scene.ts";
 
-/** Family that every paragraph loads; it also defines the line box (strut). */
+/** Family the viewer falls back to when a node arrives without resolved families. */
 export const BASE_FAMILY = "Inter:latin";
 
 export const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
@@ -15,15 +15,23 @@ export function nearestWeight(w: unknown): number {
 }
 
 export interface FontFace {
+  /** Family name the file is registered under. */
   family: string;
-  /** Path under the dev server's /fonts/ route: "<pack>/<file>". */
-  path: string;
+  /** Where the dev server serves the file. */
+  url: string;
+}
+
+export interface FontQuery {
+  weight: number;
+  italic: boolean;
+  /** `fontFamily` as written; the default family when absent. */
+  family?: string;
 }
 
 export interface FontResolver {
   provider: TypefaceFontProvider;
-  /** Makes the glyphs for `text` available and returns the families to use. */
-  resolve(text: string, weight: number): { families: string[]; missing: string[] };
+  /** Makes the glyphs for `text` available and returns the families to use, in priority order. */
+  resolve(text: string, query: FontQuery): { families: string[]; missing: string[] };
 }
 
 export interface TextEngine {
@@ -43,50 +51,99 @@ const WEIGHT_NAMES: Record<number, string> = {
   900: "Black",
 };
 
+/** Style props a <Span> can override on its <Text>. */
+export const TEXT_STYLE_PROPS = [
+  "color",
+  "fontSize",
+  "fontWeight",
+  "fontFamily",
+  "italic",
+  "letterSpacing",
+  "textDecoration",
+  "tabularNums",
+] as const;
+
+type RunStyle = Partial<Record<(typeof TEXT_STYLE_PROPS)[number], any>>;
+
+function styleOf(props: Record<string, any>): RunStyle {
+  const out: RunStyle = {};
+  for (const k of TEXT_STYLE_PROPS) if (props[k] != null) out[k] = props[k];
+  return out;
+}
+
+const queryOf = (s: RunStyle): FontQuery => ({ weight: nearestWeight(s.fontWeight), italic: !!s.italic, family: s.fontFamily });
+
 /** Builds (once) the paragraph for a Text node. Call `releaseParagraphs` when done. */
 export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph {
   if (node.paragraph) return node.paragraph;
   const { ck } = engine;
   const p = node.props;
-  const text = textContentOf(node);
-  const fontSize = p.fontSize ?? 14;
-  const weight = nearestWeight(p.fontWeight);
+  const base = styleOf(p);
+  const runs = textRunsOf(node);
+  const styles = runs.map((r) => ({ ...base, ...styleOf(r.props) }));
+
   // A node that arrives already resolved (sent from the dev server) keeps its families.
   if (!node.fontFamilies) {
-    const resolved = engine.fonts.resolve(text, weight);
-    node.fontFamilies = resolved.families;
-    node.missingGlyphs = resolved.missing;
+    const missing = new Set<string>();
+    node.fontFamilies = engine.fonts.resolve("", queryOf(base)).families;
+    runs.forEach((run, i) => {
+      const res = engine.fonts.resolve(run.text, queryOf(styles[i]));
+      run.fontFamilies = res.families;
+      for (const ch of res.missing) missing.add(ch);
+    });
+    node.missingGlyphs = [...missing];
   }
 
-  const fontStyle = { weight: (ck.FontWeight as any)[WEIGHT_NAMES[weight]] };
-  // Line height: explicit `lineHeight` in px, otherwise the base font's own
-  // metrics. The strut forces it for every line, so fallback fonts (CJK) with
-  // different metrics cannot change the line box.
-  const leading = p.lineHeight ? { heightMultiplier: p.lineHeight / fontSize } : {};
+  const baseSize = base.fontSize ?? 14;
+  // The strut forces the line box for every line, so fallback fonts (CJK) with
+  // different metrics cannot change it. It is sized for the largest run.
+  const strutSize = Math.max(baseSize, ...styles.map((s) => s.fontSize ?? 14));
+  const leading = (size: number) => (p.lineHeight ? { heightMultiplier: p.lineHeight / size } : {});
+  const textStyle = (s: RunStyle, families: string[] | undefined) => {
+    const size = s.fontSize ?? 14;
+    const color = ck.parseColorString(s.color ?? "#000000");
+    const decoration =
+      s.textDecoration === "underline" ? ck.UnderlineDecoration : s.textDecoration === "line-through" ? ck.LineThroughDecoration : ck.NoDecoration;
+    return {
+      color,
+      fontSize: size,
+      fontFamilies: families?.length ? families : [BASE_FAMILY],
+      fontStyle: {
+        weight: (ck.FontWeight as any)[WEIGHT_NAMES[nearestWeight(s.fontWeight)]],
+        slant: s.italic ? ck.FontSlant.Italic : ck.FontSlant.Upright,
+      },
+      letterSpacing: s.letterSpacing ?? 0,
+      decoration,
+      decorationColor: color,
+      decorationThickness: 1,
+      fontFeatures: s.tabularNums ? [{ name: "tnum", value: 1 }] : [],
+      halfLeading: true,
+      ...leading(size),
+    };
+  };
+
   const style = new ck.ParagraphStyle({
     textAlign: { left: ck.TextAlign.Left, center: ck.TextAlign.Center, right: ck.TextAlign.Right }[
       (p.textAlign ?? "left") as "left" | "center" | "right"
     ],
-    textStyle: {
-      color: ck.parseColorString(p.color ?? "#000000"),
-      fontSize,
-      fontFamilies: node.fontFamilies,
-      fontStyle,
-      halfLeading: true,
-      ...leading,
-    },
+    ...(p.maxLines ? { maxLines: p.maxLines, ellipsis: "…" } : {}),
+    textStyle: textStyle(base, node.fontFamilies),
     strutStyle: {
       strutEnabled: true,
       forceStrutHeight: true,
-      fontFamilies: [BASE_FAMILY],
-      fontSize,
-      fontStyle,
+      fontFamilies: (node.fontFamilies ?? [BASE_FAMILY]).slice(0, 1),
+      fontSize: strutSize,
+      fontStyle: { weight: (ck.FontWeight as any)[WEIGHT_NAMES[nearestWeight(base.fontWeight)]] },
       halfLeading: true,
-      ...leading,
+      ...leading(strutSize),
     },
   });
   const builder = ck.ParagraphBuilder.MakeFromFontProvider(style, engine.fonts.provider);
-  builder.addText(text);
+  runs.forEach((run, i) => {
+    builder.pushStyle(new ck.TextStyle(textStyle(styles[i], run.fontFamilies)));
+    builder.addText(run.text);
+    builder.pop();
+  });
   node.paragraph = builder.build();
   builder.delete();
   return node.paragraph;

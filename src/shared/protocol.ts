@@ -2,8 +2,7 @@
 // sides can import it without pulling in each other's runtime code.
 
 import type { Diagnostic } from "./diagnostics.ts";
-import type { Box, ComponentInfo } from "./scene.ts";
-import type { FontFace } from "./text.ts";
+import type { Box, ComponentInfo, TextRun } from "./scene.ts";
 
 export interface Comment {
   id: number;
@@ -41,9 +40,17 @@ export interface SerializedNode {
   props: Record<string, any>;
   layout: Box;
   component?: ComponentInfo;
+  /** Text only: the resolved families of the Text's own style. */
   fontFamilies?: string[];
+  /** Text only: styled runs with their resolved families. */
+  runs?: TextRun[];
   children: SerializedNode[];
 }
+
+/** A file the viewer must load before painting. */
+export type AssetEntry =
+  | { kind: "font"; family: string; url: string }
+  | { kind: "image"; id: string; url: string };
 
 export interface FramePayload {
   name: string;
@@ -57,6 +64,6 @@ export interface ScenePayload {
   file: string;
   frames: FramePayload[];
   diagnostics: Diagnostic[];
-  fonts: FontFace[];
+  assets: AssetEntry[];
   comments: ResolvedComment[];
 }

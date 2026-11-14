@@ -1,11 +1,14 @@
 // Text/JSON views of a laid-out tree.
 
-import { formatPropsSummary, sourceOf, textContentOf, walk, type SceneNode } from "../shared/scene.ts";
+import { formatPropsSummary, layerChildren, sourceOf, textContentOf, type SceneNode } from "../shared/scene.ts";
 
 export function formatTree(root: SceneNode): string {
   const lines: string[] = [];
-  walk(root, (n, depth) => {
-    if (n.type === "#text") return;
+  const walk = (n: SceneNode, depth: number) => {
+    line(n, depth);
+    for (const c of layerChildren(n)) walk(c, depth + 1);
+  };
+  const line = (n: SceneNode, depth: number) => {
     const { x, y, width, height } = n.layout;
     if (n.component) {
       const summary = formatPropsSummary(n.component.props);
@@ -19,7 +22,8 @@ export function formatTree(root: SceneNode): string {
     lines.push(
       `${"  ".repeat(depth)}${n.type}${name}${text}  [${x},${y} ${width}x${height}]  ${sourceOf(n) ?? ""}`.trimEnd(),
     );
-  });
+  };
+  walk(root, 0);
   return lines.join("\n");
 }
 
@@ -31,16 +35,16 @@ export function toJson(n: SceneNode): object {
       props: n.component.props,
       layout: n.layout,
       source: sourceOf(n),
-      children: n.children.filter((c) => c.type !== "#text").map(toJson),
+      children: layerChildren(n).map(toJson),
     };
   }
   const { children: _c, $source, ...props } = n.props;
   return {
     type: n.type,
-    ...(n.type === "Text" ? { text: textContentOf(n) } : {}),
+    ...(n.type === "Text" ? { text: textContentOf(n), ...(n.runs && n.runs.length > 1 ? { runs: n.runs.map(({ text, props }) => ({ text, props })) } : {}) } : {}),
     props,
     layout: n.layout,
     source: $source,
-    children: n.children.filter((c) => c.type !== "#text").map(toJson),
+    children: layerChildren(n).map(toJson),
   };
 }

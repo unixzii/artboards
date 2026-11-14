@@ -19,6 +19,77 @@ export interface Shadow {
 
 export type ViewBox = string | [number, number, number, number];
 
+export interface GradientStop {
+  color: string;
+  /** 0..1 along the gradient. Stops without one are spread evenly. */
+  position?: number;
+}
+
+export interface LinearGradient {
+  type: "linear";
+  /** CSS-style direction in degrees: 0 = to top, 90 = to right, 180 = to bottom (default). */
+  angle?: number;
+  stops: (string | GradientStop)[];
+}
+
+export interface RadialGradient {
+  type: "radial";
+  /** Centre as fractions of the box. Default [0.5, 0.5]. */
+  center?: [number, number];
+  /** Radius as a fraction of the box size (an ellipse when the box is not square). Default 0.5. */
+  radius?: number;
+  stops: (string | GradientStop)[];
+}
+
+export type Gradient = LinearGradient | RadialGradient;
+
+/** What `fill` and `stroke` accept: a color string or a gradient. */
+export type Fill = string | Gradient;
+
+/** A file imported into a design (`import photo from "./photo.jpg"`). */
+export interface AssetRef {
+  $asset: "image" | "font";
+  /** Content hash; also the file's name on the dev server. */
+  id: string;
+  /** Path relative to the working directory. */
+  file: string;
+}
+
+export function isAssetRef(v: unknown): v is AssetRef {
+  return typeof v === "object" && v !== null && ((v as any).$asset === "image" || (v as any).$asset === "font") && typeof (v as any).id === "string";
+}
+
+export interface Sides {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** all | [vertical, horizontal] | [top, right, bottom, left] -> four sides. */
+export function expandSides(p: number | number[] | undefined, fallback = 0): Sides {
+  if (p == null) return { top: fallback, right: fallback, bottom: fallback, left: fallback };
+  if (typeof p === "number") return { top: p, right: p, bottom: p, left: p };
+  if (p.length === 2) return { top: p[0], right: p[1], bottom: p[0], left: p[1] };
+  return { top: p[0], right: p[1], bottom: p[2], left: p[3] };
+}
+
+/** all | [topLeft, topRight, bottomRight, bottomLeft] -> four corner radii. */
+export function expandCorners(r: number | number[] | undefined): [number, number, number, number] {
+  if (r == null) return [0, 0, 0, 0];
+  if (typeof r === "number") return [r, r, r, r];
+  return [r[0], r[1], r[2], r[3]];
+}
+
+/** One styled run of a Text: the Text's own text, or a <Span>. */
+export interface TextRun {
+  text: string;
+  /** Span props (style overrides); empty for the Text's own text. */
+  props: Record<string, any>;
+  /** Font families this run uses, once resolved. */
+  fontFamilies?: string[];
+}
+
 export function parseViewBox(vb: unknown): [number, number, number, number] | null {
   if (Array.isArray(vb)) {
     if (vb.length !== 4 || !vb.every((n) => typeof n === "number" && Number.isFinite(n))) return null;
@@ -63,7 +134,9 @@ export interface PaintableNode {
   text?: string;
   /** Laid-out Skia paragraph, only for Text nodes. Owned by the text module. */
   paragraph?: any;
-  /** Font families the Text node's paragraph uses, once resolved. */
+  /** Styled runs of a Text node (see textRunsOf). */
+  runs?: TextRun[];
+  /** Font families of the Text node's own style (they also set the line box), once resolved. */
   fontFamilies?: string[];
   /** Characters in a Text node that no bundled font covers. */
   missingGlyphs?: string[];
@@ -97,9 +170,27 @@ export function sourceOf(node: PaintableNode): string | undefined {
 }
 
 export function textContentOf(node: PaintableNode): string {
+  if (node.runs) return node.runs.map((r) => r.text).join("");
   const c = node.props.children;
   if (typeof c === "string" || typeof c === "number") return String(c);
-  return node.children.map((n) => n.text ?? "").join("");
+  return node.children.map((n) => (n.type === "Span" ? textContentOf(n) : (n.text ?? ""))).join("");
+}
+
+/** The runs a Text paragraph is built from: plain text children and <Span>s, in order. */
+export function textRunsOf(node: PaintableNode): TextRun[] {
+  if (node.runs) return node.runs;
+  const c = node.props.children;
+  if (typeof c === "string" || typeof c === "number") return (node.runs = [{ text: String(c), props: {} }]);
+  const runs: TextRun[] = [];
+  for (const n of node.children) {
+    if (n.type === "Span") {
+      const { children: _c, $source: _s, ...props } = n.props;
+      runs.push({ text: textContentOf(n), props });
+    } else if (n.text) {
+      runs.push({ text: n.text, props: {} });
+    }
+  }
+  return (node.runs = runs);
 }
 
 /** Compact `k="v"` summary of component props for tree rows and anchor hints. */
@@ -126,9 +217,9 @@ export function walk<N extends { children: N[] }>(node: N, fn: (n: N, depth: num
   for (const c of node.children) walk(c, fn, depth + 1);
 }
 
-/** Layer children: everything except raw text instances. */
+/** Layer children: everything except raw text instances and the <Span>s inside a Text. */
 export function layerChildren<N extends { type: string; children: N[] }>(node: N): N[] {
-  return node.children.filter((c) => c.type !== "#text");
+  return node.children.filter((c) => c.type !== "#text" && c.type !== "Span");
 }
 
 /**

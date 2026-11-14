@@ -11,7 +11,7 @@ import { loadModule } from "./dsl/loader.ts";
 import { createSceneRoot, groupComponents } from "./dsl/reconciler.ts";
 import { DslError } from "./dsl/schema.ts";
 import { layoutTree } from "./layout.ts";
-import { createTextEngine, type NodeEngine } from "./skia.ts";
+import { createEngine, type NodeEngine } from "./skia.ts";
 
 export interface FrameEntry {
   /** Component name, falling back to the export name. */
@@ -69,7 +69,7 @@ export function reconcileFrame(frame: FrameEntry, opts: { group?: boolean } = {}
 
 export async function buildFrame(frame: FrameEntry): Promise<BuiltFrame> {
   const { root, unmount } = reconcileFrame(frame, { group: false });
-  const engine = await createTextEngine();
+  const engine = await createEngine();
   await layoutTree(root, engine);
   groupComponents(root);
   return {
@@ -89,7 +89,8 @@ export function errorToDiagnostic(e: unknown, file: string, frame?: string): Dia
   const err = e instanceof Error ? e : new Error(String(e));
   // DSL modules are evaluated through `new Function`, which prepends two lines.
   const abs = resolve(file);
-  const at = err.stack?.split("\n").find((l) => l.includes(abs) || /\.(jsx|tsx)[:)]/.test(l));
+  // Only stack frames ("    at ..."): the message itself may name the file too.
+  const at = err.stack?.split("\n").filter((l) => /^\s+at /.test(l)).find((l) => l.includes(abs) || /\.(jsx|tsx)[:)]/.test(l));
   const m = at && /((?:\/|[A-Za-z]:\\)[^():]+):(\d+):\d+/.exec(at);
   return {
     severity: "error",
