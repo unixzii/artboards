@@ -13,15 +13,24 @@
 // one is under way artboards are drawn from textures ("tiles") rendered a
 // moment earlier and merely stretched; the pictures are replayed again, sharp,
 // once the zoom settles.
+//
+// Text too small on screen to read is drawn as bars rather than glyphs. Which
+// text that is depends on the zoom, so an artboard has a picture per level of
+// detail, recorded the first time it is needed.
 
 import type { Canvas, CanvasKit, Image, Paint, SkPicture, Surface } from "canvaskit-wasm";
 import type { RenderEngine } from "../../shared/engine.ts";
 import { paintNode } from "../../shared/paint.ts";
+import type { PaintableNode } from "../../shared/scene.ts";
+import { textSizeOf } from "../../shared/text.ts";
 import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewFrame, type ViewNode } from "../core/model.ts";
 import type { StageBackend, StageElements } from "../core/viewer.ts";
 
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 64;
+
+/** Text smaller than this on screen, in CSS pixels, is drawn as bars. */
+const MIN_TEXT_PX = 3;
 
 /** A zoom step this soon after the last one is part of a gesture. */
 const SETTLE_MS = 150;
@@ -33,6 +42,19 @@ const TILE_MARGIN = 0.25;
 const TILE_MAX_STRETCH = 1.5;
 const TILE_MIN_STRETCH = 0.5;
 const TILE_MAX_SIDE = 8192;
+
+/** An artboard's pictures, one per level of detail. */
+interface Recording {
+  /** The distinct font sizes in the artboard, ascending. */
+  sizes: number[];
+  /** By how many of `sizes` are drawn as bars; 0 is the artboard in full. */
+  levels: Map<number, SkPicture>;
+}
+
+function collectTextSizes(node: PaintableNode, into: Set<number>) {
+  if (node.type === "Text") into.add(textSizeOf(node));
+  else for (const child of node.children) collectTextSizes(child, into);
+}
 
 /** Part of an artboard rendered to a texture, in the artboard's coordinates. */
 interface Tile {
@@ -51,7 +73,7 @@ export class Renderer implements StageBackend {
   private engine: RenderEngine;
   private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint };
   private surface: Surface | null = null;
-  private pictures = new Map<string, SkPicture>();
+  private recordings = new Map<string, Recording>();
   private tiles = new Map<string, Tile>();
   /** Whether a zoom gesture is under way, i.e. artboards are drawn from tiles. */
   private zooming = false;
@@ -120,30 +142,50 @@ export class Renderer implements StageBackend {
 
   /** Replaces the scene: each artboard is recorded once into a picture and replayed per frame. */
   setModel(model: Model) {
-    for (const picture of this.pictures.values()) picture.delete();
-    this.pictures.clear();
+    for (const name of [...this.recordings.keys()]) this.forget(name);
     this.dropTiles();
     this.model = model;
     this.selected = this.hovered = null;
-    for (const f of model.frames) this.record(f);
     this.requestDraw();
   }
 
   refreshFrame(frame: ViewFrame) {
-    this.pictures.get(frame.name)?.delete();
-    this.pictures.delete(frame.name);
+    this.forget(frame.name);
     this.tiles.get(frame.name)?.image.delete();
     this.tiles.delete(frame.name);
-    this.record(frame);
     this.requestDraw();
   }
 
-  private record(f: ViewFrame) {
-    if (!f.root) return;
-    const recorder = new this.ck.PictureRecorder();
-    paintNode(this.engine, recorder.beginRecording(this.ck.LTRBRect(0, 0, f.w, f.h)), f.root);
-    this.pictures.set(f.name, recorder.finishRecordingAsPicture());
-    recorder.delete();
+  private forget(name: string) {
+    for (const picture of this.recordings.get(name)?.levels.values() ?? []) picture.delete();
+    this.recordings.delete(name);
+  }
+
+  /**
+   * The picture to replay an artboard from at the current zoom, recorded on
+   * first use; null for an artboard that failed to render.
+   */
+  private pictureFor(f: ViewFrame): SkPicture | null {
+    if (!f.root) return null;
+    let recording = this.recordings.get(f.name);
+    if (!recording) {
+      const sizes = new Set<number>();
+      collectTextSizes(f.root, sizes);
+      recording = { sizes: [...sizes].sort((a, b) => a - b), levels: new Map() };
+      this.recordings.set(f.name, recording);
+    }
+    const greekBelow = MIN_TEXT_PX / this.view.s;
+    const level = recording.sizes.findLastIndex((size) => size < greekBelow) + 1;
+    let picture = recording.levels.get(level);
+    if (!picture) {
+      const recorder = new this.ck.PictureRecorder();
+      // Any threshold between two neighbouring sizes records the same picture.
+      paintNode(this.engine, recorder.beginRecording(this.ck.LTRBRect(0, 0, f.w, f.h)), f.root, level ? greekBelow : 0);
+      picture = recorder.finishRecordingAsPicture();
+      recorder.delete();
+      recording.levels.set(level, picture);
+    }
+    return picture;
   }
 
   setHighlight(selected: ViewNode | null, hovered: ViewNode | null) {
@@ -370,7 +412,7 @@ export class Renderer implements StageBackend {
     for (const f of this.model.frames) {
       if (f.x > max.x || f.y > max.y || f.x + f.w < min.x || f.y + f.h < min.y) continue;
       const rect = ck.LTRBRect(f.x, f.y, f.x + f.w, f.y + f.h);
-      const picture = this.pictures.get(f.name);
+      const picture = this.pictureFor(f);
       if (picture) {
         canvas.drawRect(rect, paints.white);
         canvas.save();

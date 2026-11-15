@@ -85,6 +85,12 @@ export function textQueriesOf(node: PaintableNode): { text: string; query: FontQ
   ];
 }
 
+/** The largest font size in a Text node. */
+export function textSizeOf(node: PaintableNode): number {
+  const base = node.props.fontSize ?? 14;
+  return Math.max(base, ...textRunsOf(node).map((run) => run.props.fontSize ?? base));
+}
+
 /** Builds (once) the paragraph for a Text node. Call `releaseParagraphs` when done. */
 export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph {
   if (node.paragraph) return node.paragraph;

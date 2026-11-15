@@ -1,6 +1,6 @@
 // Scene tree -> Skia canvas. Platform-free: used by both Node export and browser viewer.
 
-import type { Canvas, CanvasKit, ImageFilter, Paint, Path } from "canvaskit-wasm";
+import type { Canvas, CanvasKit, ImageFilter, Paint, Paragraph, Path } from "canvaskit-wasm";
 import type { RenderEngine } from "./engine.ts";
 import {
   expandCorners,
@@ -13,13 +13,21 @@ import {
   type Shadow,
   type Sides,
 } from "./scene.ts";
-import { paragraphFor } from "./text.ts";
+import { paragraphFor, textSizeOf } from "./text.ts";
 
 const DEFAULT_SHADOW_COLOR = "rgba(0, 0, 0, 0.25)";
 const PLACEHOLDER_FILL = "#e5e7eb";
 const PLACEHOLDER_LINE = "#9ca3af";
 
-export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableNode) {
+/** How much of a line of text is ink, roughly: the opacity of the bar that stands in for it. */
+const GREEK_OPACITY = 0.4;
+
+/**
+ * Paints a node and everything in it. Text whose font size is below
+ * `greekBelow` is drawn as a bar per line instead of glyphs: the viewer uses
+ * this for text too small on screen to read, which is costly to rasterise.
+ */
+export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableNode, greekBelow = 0) {
   if (node.type === "#text" || node.type === "Span") return;
   const { ck } = engine;
   const { x, y, width: w, height: h } = node.layout;
@@ -45,7 +53,11 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   }
 
   if (isComponentNode(node)) {
-    for (const child of node.children) paintNode(engine, canvas, child);
+    for (const child of node.children) paintNode(engine, canvas, child, greekBelow);
+  } else if (node.type === "Text" && textSizeOf(node) < greekBelow) {
+    const para = paragraphFor(engine, node);
+    para.layout(w);
+    greekText(ck, canvas, node, para);
   } else if (node.type === "Text") {
     const para = paragraphFor(engine, node);
     para.layout(w);
@@ -56,7 +68,7 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   } else if (node.type === "Path") {
     paintPathNode(ck, canvas, node);
   } else if (box) {
-    paintBox(engine, canvas, node, box);
+    paintBox(engine, canvas, node, box, greekBelow);
   }
 
   if (opacity < 1) canvas.restore();
@@ -117,7 +129,7 @@ const uniform = (d: number): Sides => ({ top: d, right: d, bottom: d, left: d })
 
 // ------------------------------------------------------------------ boxes
 
-function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box: BoxGeometry) {
+function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box: BoxGeometry, greekBelow: number) {
   const { ck } = engine;
   const p = node.props;
   const { w, h } = box;
@@ -142,7 +154,20 @@ function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box
 
   if (p.clip || p.scroll) canvas.clipRRect(outer, ck.ClipOp.Intersect, true);
   if (node.scroll) canvas.translate(-node.scroll.x, -node.scroll.y);
-  for (const child of node.children) paintNode(engine, canvas, child);
+  for (const child of node.children) paintNode(engine, canvas, child, greekBelow);
+}
+
+/** A bar per line where the lowercase letters would sit, in the text's color. */
+function greekText(ck: CanvasKit, canvas: Canvas, node: PaintableNode, para: Paragraph) {
+  const size = textSizeOf(node);
+  const color = ck.parseColorString(node.props.color ?? "#000000");
+  color[3] *= GREEK_OPACITY;
+  const paint = new ck.Paint();
+  paint.setColor(color);
+  for (const line of para.getLineMetrics()) {
+    canvas.drawRect(ck.LTRBRect(line.left, line.baseline - size / 2, line.left + line.width, line.baseline), paint);
+  }
+  paint.delete();
 }
 
 function drawBoxStroke(ck: CanvasKit, canvas: Canvas, node: PaintableNode, box: BoxGeometry) {
