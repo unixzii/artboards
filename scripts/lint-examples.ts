@@ -14,6 +14,7 @@ const EXAMPLES = [
   "examples/features/features.jsx",
   "examples/features/illustrations.jsx",
   "examples/roastery/index.tsx",
+  "examples/artboards/index.tsx",
 ];
 
 let failed = 0;

@@ -1,3 +1,5 @@
+![Artboards: design UI as code, with your agents](.github/header.png)
+
 # Artboards
 
 Design UI as code. You write artboards as JSX/TSX components using a set of built-in layers. The CLI
