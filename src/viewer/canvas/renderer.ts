@@ -8,11 +8,18 @@
 // shows: the surface is not reallocated and the design stays where it is on
 // screen. Points passed in and out of this class are relative to the stage.
 //
-// Replaying a picture at a scale it has not been drawn at before is slow: every
-// glyph is rasterised again. A pinch changes the scale on every frame, so while
-// one is under way artboards are drawn from textures ("tiles") rendered a
-// moment earlier and merely stretched; the pictures are replayed again, sharp,
-// once the zoom settles.
+// Artboards are recorded into pictures, and mostly drawn from textures ("tiles")
+// rendered from those:
+//
+// - An artboard small enough on screen keeps a tile of the whole of it at the
+//   current scale, placed on whole device pixels. Panning, hovering and
+//   selecting then cost a textured quad per artboard instead of a replay.
+// - One too large for that (zoomed in, when little of it shows) is replayed
+//   every frame; its picture skips what falls outside the viewport.
+// - Replaying at a scale not drawn before is slow, as every glyph is rasterised
+//   again, and a pinch changes the scale on every frame. While one is under way
+//   every artboard is drawn from a tile rendered a moment earlier and merely
+//   stretched; things are drawn sharp again once the zoom settles.
 //
 // Text too small on screen to read is drawn as bars rather than glyphs. Which
 // text that is depends on the zoom, so an artboard has a picture per level of
@@ -34,8 +41,12 @@ const MIN_TEXT_PX = 3;
 
 /** A zoom step this soon after the last one is part of a gesture. */
 const SETTLE_MS = 150;
-/** Tiles outlive the gesture by this long, so one that pauses and resumes reuses them. */
+/** Tiles only a gesture could use outlive it by this long, so one that pauses and resumes reuses them. */
 const TILE_TTL_MS = 2000;
+/** An artboard repainted this recently (a scroll in Play mode, a rebuild) is replayed rather than given a tile that would not last. */
+const REPAINT_MS = 250;
+/** All tiles together may hold this many times the canvas's pixels. */
+const TILE_BUDGET = 2;
 /** How far past the viewport a tile reaches, as a fraction of the viewport's size. */
 const TILE_MARGIN = 0.25;
 /** A tile is redrawn once it is stretched or shrunk past these factors. */
@@ -65,6 +76,11 @@ interface Tile {
   h: number;
   /** Device pixels per artboard unit the tile was rendered for. */
   scale: number;
+  /** Whether it holds the whole artboard at exactly `scale`: the kind that is kept once the zoom settles. */
+  resident: boolean;
+  pixels: number;
+  /** The draw that last used it. */
+  used: number;
 }
 
 export class Renderer implements StageBackend {
@@ -75,6 +91,13 @@ export class Renderer implements StageBackend {
   private surface: Surface | null = null;
   private recordings = new Map<string, Recording>();
   private tiles = new Map<string, Tile>();
+  private tilePixels = 0;
+  /** Counts draws. */
+  private serial = 0;
+  /** When each artboard was last repainted, and when the scene was last replaced. */
+  private repainted = new Map<string, number>();
+  private replacedAt = -Infinity;
+  private repaintTimer: ReturnType<typeof setTimeout> | undefined;
   /** Whether a zoom gesture is under way, i.e. artboards are drawn from tiles. */
   private zooming = false;
   private zoomedAt = -Infinity;
@@ -134,6 +157,7 @@ export class Renderer implements StageBackend {
     clearTimeout(this.settleTimer);
     clearTimeout(this.tileTimer);
     this.setModel(EMPTY_MODEL);
+    clearTimeout(this.repaintTimer);
     this.surface?.delete();
     this.surface = null;
   }
@@ -144,16 +168,26 @@ export class Renderer implements StageBackend {
   setModel(model: Model) {
     for (const name of [...this.recordings.keys()]) this.forget(name);
     this.dropTiles();
+    this.repainted.clear();
+    this.replacedAt = performance.now();
     this.model = model;
     this.selected = this.hovered = null;
     this.requestDraw();
+    this.drawAfterRepaints();
   }
 
   refreshFrame(frame: ViewFrame) {
     this.forget(frame.name);
-    this.tiles.get(frame.name)?.image.delete();
-    this.tiles.delete(frame.name);
+    this.dropTile(frame.name);
+    this.repainted.set(frame.name, performance.now());
     this.requestDraw();
+    this.drawAfterRepaints();
+  }
+
+  /** Draws once repaints have stopped coming, which is when the artboards get their tiles back. */
+  private drawAfterRepaints() {
+    clearTimeout(this.repaintTimer);
+    this.repaintTimer = setTimeout(this.requestDraw, REPAINT_MS);
   }
 
   private forget(name: string) {
@@ -180,7 +214,8 @@ export class Renderer implements StageBackend {
     if (!picture) {
       const recorder = new this.ck.PictureRecorder();
       // Any threshold between two neighbouring sizes records the same picture.
-      paintNode(this.engine, recorder.beginRecording(this.ck.LTRBRect(0, 0, f.w, f.h)), f.root, level ? greekBelow : 0);
+      // Recording bounds lets a replay skip what lies outside the clip.
+      paintNode(this.engine, recorder.beginRecording(this.ck.LTRBRect(0, 0, f.w, f.h), true), f.root, level ? greekBelow : 0);
       picture = recorder.finishRecordingAsPicture();
       recorder.delete();
       recording.levels.set(level, picture);
@@ -243,12 +278,68 @@ export class Renderer implements StageBackend {
       this.zooming = false;
       this.requestDraw();
     }, SETTLE_MS);
-    this.tileTimer = setTimeout(() => this.dropTiles(), TILE_TTL_MS);
+    this.tileTimer = setTimeout(() => {
+      const scale = this.view.s * this.dpr;
+      for (const [name, tile] of this.tiles) if (!tile.resident || tile.scale !== scale) this.dropTile(name);
+    }, TILE_TTL_MS);
+  }
+
+  private dropTile(name: string) {
+    const tile = this.tiles.get(name);
+    if (!tile) return;
+    tile.image.delete();
+    this.tilePixels -= tile.pixels;
+    this.tiles.delete(name);
   }
 
   private dropTiles() {
-    for (const tile of this.tiles.values()) tile.image.delete();
-    this.tiles.clear();
+    for (const name of [...this.tiles.keys()]) this.dropTile(name);
+  }
+
+  /** Renders part of an artboard (in its coordinates) to a tile, replacing the one it has. */
+  private renderTile(f: ViewFrame, picture: SkPicture, x: number, y: number, w: number, h: number): Tile | null {
+    const scale = this.view.s * this.dpr;
+    const texels = Math.min(scale, TILE_MAX_SIDE / w, TILE_MAX_SIDE / h);
+    const width = Math.max(1, Math.ceil(w * texels));
+    const height = Math.max(1, Math.ceil(h * texels));
+    const target = this.surface!.makeSurface({ ...this.surface!.imageInfo(), width, height });
+    if (!target) return null;
+    const canvas = target.getCanvas();
+    canvas.clear(this.ck.WHITE);
+    canvas.scale(texels, texels);
+    canvas.translate(-x, -y);
+    canvas.drawPicture(picture);
+    const image = target.makeImageSnapshot();
+    target.delete();
+
+    this.dropTile(f.name);
+    const resident = texels === scale && x === 0 && y === 0 && w === f.w && h === f.h;
+    const tile: Tile = { image, x, y, w: width / texels, h: height / texels, scale, resident, pixels: width * height, used: this.serial };
+    this.tiles.set(f.name, tile);
+    this.tilePixels += tile.pixels;
+    return tile;
+  }
+
+  /**
+   * The tile of a whole artboard at the current scale, rendered if it has none.
+   * Null when the artboard is too large on screen for one, or the tiles drawn
+   * this frame already fill the budget; it is then replayed instead.
+   */
+  private residentTile(f: ViewFrame, picture: SkPicture): Tile | null {
+    const scale = this.view.s * this.dpr;
+    const old = this.tiles.get(f.name);
+    if (old?.resident && old.scale === scale) return old;
+
+    const width = Math.ceil(f.w * scale);
+    const height = Math.ceil(f.h * scale);
+    const canvasPixels = this.els.canvas.width * this.els.canvas.height;
+    if (width > TILE_MAX_SIDE || height > TILE_MAX_SIDE || width * height > canvasPixels) return null;
+    // Make room by giving up the tiles that have gone longest without being drawn.
+    const idle = [...this.tiles].filter(([name, tile]) => tile.used < this.serial && name !== f.name).sort((a, b) => a[1].used - b[1].used);
+    const held = () => this.tilePixels - (old?.pixels ?? 0);
+    while (held() + width * height > canvasPixels * TILE_BUDGET && idle.length) this.dropTile(idle.shift()![0]);
+    if (held() + width * height > canvasPixels * TILE_BUDGET) return null;
+    return this.renderTile(f, picture, 0, 0, f.w, f.h);
   }
 
   /**
@@ -257,7 +348,7 @@ export class Renderer implements StageBackend {
    * in the artboard's coordinates), or it has gone soft. Tiles that still cover
    * are sharpened one per frame, so a gesture never pays for all of them at once.
    */
-  private tileFor(f: ViewFrame, picture: SkPicture, x0: number, y0: number, x1: number, y1: number, budget: { sharpened: boolean }): Tile | null {
+  private gestureTile(f: ViewFrame, picture: SkPicture, x0: number, y0: number, x1: number, y1: number, budget: { sharpened: boolean }): Tile | null {
     const scale = this.view.s * this.dpr;
     const old = this.tiles.get(f.name);
     if (old) {
@@ -274,25 +365,7 @@ export class Renderer implements StageBackend {
     const my = (this.viewport.height / this.view.s) * TILE_MARGIN;
     const x = Math.max(0, x0 - mx);
     const y = Math.max(0, y0 - my);
-    const w = Math.min(f.w, x1 + mx) - x;
-    const h = Math.min(f.h, y1 + my) - y;
-    const texels = Math.min(scale, TILE_MAX_SIDE / w, TILE_MAX_SIDE / h);
-    const width = Math.max(1, Math.ceil(w * texels));
-    const height = Math.max(1, Math.ceil(h * texels));
-    const target = this.surface!.makeSurface({ ...this.surface!.imageInfo(), width, height });
-    if (!target) return old ?? null;
-    const canvas = target.getCanvas();
-    canvas.clear(this.ck.WHITE);
-    canvas.scale(texels, texels);
-    canvas.translate(-x, -y);
-    canvas.drawPicture(picture);
-    const image = target.makeImageSnapshot();
-    target.delete();
-
-    old?.image.delete();
-    const tile: Tile = { image, x, y, w: width / texels, h: height / texels, scale };
-    this.tiles.set(f.name, tile);
-    return tile;
+    return this.renderTile(f, picture, x, y, Math.min(f.w, x1 + mx) - x, Math.min(f.h, y1 + my) - y) ?? old ?? null;
   }
 
   resetZoom() {
@@ -348,6 +421,7 @@ export class Renderer implements StageBackend {
     const h = Math.ceil(Math.max(screen.height, window.innerHeight) * dpr);
     const stale = !this.surface || dpr !== this.dpr || w > canvas.width || h > canvas.height;
     if (stale) {
+      this.dropTiles(); // they belong to the surface's context
       this.surface?.delete();
       this.dpr = dpr;
       canvas.width = w;
@@ -409,29 +483,49 @@ export class Renderer implements StageBackend {
     const min = this.toWorld({ x: 0, y: 0 });
     const max = this.toWorld({ x: this.size.width, y: this.size.height });
     const budget = { sharpened: false };
+    const now = performance.now();
+    const scale = view.s * dpr;
+    this.serial++;
     for (const f of this.model.frames) {
       if (f.x > max.x || f.y > max.y || f.x + f.w < min.x || f.y + f.h < min.y) continue;
-      const rect = ck.LTRBRect(f.x, f.y, f.x + f.w, f.y + f.h);
+      const rect = ck.LTRBRect(0, 0, f.w, f.h);
       const picture = this.pictureFor(f);
-      if (picture) {
-        canvas.drawRect(rect, paints.white);
-        canvas.save();
-        canvas.clipRect(rect, ck.ClipOp.Intersect, true);
+      canvas.save();
+      if (!picture) {
         canvas.translate(f.x, f.y);
-        const tile = this.zooming
-          ? this.tileFor(f, picture, Math.max(0, min.x - f.x), Math.max(0, min.y - f.y), Math.min(f.w, max.x - f.x), Math.min(f.h, max.y - f.y), budget)
-          : null;
-        if (tile) {
-          const src = ck.XYWHRect(0, 0, tile.image.width(), tile.image.height());
-          canvas.drawImageRectOptions(tile.image, src, ck.XYWHRect(tile.x, tile.y, tile.w, tile.h), ck.FilterMode.Linear, ck.MipmapMode.None, null);
-        } else {
-          canvas.drawPicture(picture);
-        }
-        canvas.restore();
-      } else {
         paints.error.setStrokeWidth(1.5 / view.s);
         canvas.drawRect(rect, paints.error);
+        canvas.restore();
+        continue;
       }
+
+      let tile: Tile | null = null;
+      if (this.zooming) {
+        tile = this.gestureTile(f, picture, Math.max(0, min.x - f.x), Math.max(0, min.y - f.y), Math.min(f.w, max.x - f.x), Math.min(f.h, max.y - f.y), budget);
+      } else if (now - Math.max(this.replacedAt, this.repainted.get(f.name) ?? -Infinity) >= REPAINT_MS) {
+        tile = this.residentTile(f, picture);
+      }
+      if (tile) tile.used = this.serial;
+
+      // A settled tile goes on whole device pixels, where its texels are copied
+      // as they are; anywhere else they would be blended with their neighbours.
+      let { x, y } = f;
+      if (tile && !this.zooming) {
+        const px = (view.tx + f.x * view.s) * dpr;
+        const py = (view.ty + f.y * view.s) * dpr;
+        x += (Math.round(px) - px) / scale;
+        y += (Math.round(py) - py) / scale;
+      }
+      canvas.translate(x, y);
+      canvas.drawRect(rect, paints.white);
+      canvas.clipRect(rect, ck.ClipOp.Intersect, true);
+      if (tile) {
+        const src = ck.XYWHRect(0, 0, tile.image.width(), tile.image.height());
+        canvas.drawImageRectOptions(tile.image, src, ck.XYWHRect(tile.x, tile.y, tile.w, tile.h), ck.FilterMode.Linear, ck.MipmapMode.None, null);
+      } else {
+        canvas.drawPicture(picture);
+      }
+      canvas.restore();
     }
     if (this.hovered && this.hovered !== this.selected) {
       this.outline(canvas, this.hovered, this.hovered.component ? paints.compHover : paints.hover, 1.5);
