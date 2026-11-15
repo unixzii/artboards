@@ -7,6 +7,7 @@ import { builtinFamilies, declareFont, type CustomFace } from "../fonts.ts";
 import { DslError } from "./schema.ts";
 
 export { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "react";
+export { useVariant } from "./variants.ts";
 
 export const Frame = "Frame";
 export const Row = "Row";

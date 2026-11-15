@@ -2,6 +2,7 @@
 // `<name>.comments.json` so the agent can read them with `artboards comments`.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { groupComponents } from "../engine/dsl/reconciler.ts";
 import { listFrames, reconcileFrame } from "../engine/pipeline.ts";
 import type { Comment, NewComment, ResolvedComment } from "../shared/protocol.ts";
 import { formatPropsSummary, layerHint, nodeAtPath, nodePath, sourceOf, textContentOf, walk, type SceneNode } from "../shared/scene.ts";
@@ -100,7 +101,8 @@ export function resolveFileComments(file: string): ResolvedComment[] {
       continue;
     }
     try {
-      const { root, unmount } = reconcileFrame(entry);
+      const { host, unmount } = reconcileFrame(entry);
+      const root = groupComponents(host);
       for (const c of list) resolved.push(resolveComment(c, root));
       unmount();
     } catch {

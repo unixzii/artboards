@@ -72,6 +72,18 @@ declare module "artboards" {
    */
   export function defineFont(name: string, faces: FontAsset | FontFaceSource[]): string;
 
+  /** A value a variant can take. */
+  export type VariantValue = string | number | boolean;
+  /**
+   * A named state of the artboard that reviewers can switch between (the viewer, or
+   * `--variant name=value` on the command line). Returns the value and a setter, like
+   * useState. Calls with the same name in one artboard share one value.
+   * @param initial Defaults to the first option.
+   * @example
+   * const [step, setStep] = useVariant("Step", [0, 1, 2, 3], 1);
+   */
+  export function useVariant<const T extends VariantValue>(name: string, options: readonly T[], initial?: NoInfer<T>): [T, (value: T) => void];
+
   export interface FrameProps {
     /** Fixed px, "fill" (take available space) or "hug" (fit content). Default "hug". */
     width?: Size;

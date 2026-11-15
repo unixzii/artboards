@@ -10,6 +10,7 @@ import { typecheck } from "./checks/typecheck.ts";
 import { loadModule } from "./dsl/loader.ts";
 import { createSceneRoot, groupComponents } from "./dsl/reconciler.ts";
 import { DslError } from "./dsl/schema.ts";
+import { VariantContext, VariantStore, type VariantInfo } from "./dsl/variants.ts";
 import { layoutTree } from "./layout.ts";
 import { createEngine, type NodeEngine } from "./skia.ts";
 
@@ -21,7 +22,12 @@ export interface FrameEntry {
 
 export interface BuiltFrame {
   name: string;
+  /** Layer tree: what inspect, lint, comments and the viewer see. */
   root: SceneNode;
+  /** Host tree, owned by React; layout is written here. */
+  host: SceneNode;
+  /** The artboard's variants, as rendered. */
+  variants: VariantStore;
   engine: NodeEngine;
   dispose(): void;
 }
@@ -53,31 +59,39 @@ export function pickFrames(frames: FrameEntry[], name: string | undefined, file:
   return hit;
 }
 
-/** Reconciles one artboard into a SceneNode tree without initializing WASM layout or fonts. */
-export function reconcileFrame(frame: FrameEntry, opts: { group?: boolean } = {}): { root: SceneNode; unmount(): void } {
+/**
+ * Reconciles one artboard into its host tree, without initializing WASM layout
+ * or fonts. React keeps the tree until `unmount`; build its layer tree with
+ * `groupComponents` instead of rewiring it.
+ */
+export function reconcileFrame(
+  frame: FrameEntry,
+  opts: { variants?: VariantStore } = {},
+): { host: SceneNode; variants: VariantStore; unmount(): void } {
+  const variants = opts.variants ?? new VariantStore();
   const scene = createSceneRoot();
-  scene.render(createElement(frame.component));
+  scene.render(createElement(VariantContext.Provider, { value: variants }, createElement(frame.component)));
   const roots = scene.root.children.filter((c) => c.type !== "#text");
   if (roots.length !== 1) {
     scene.unmount();
     throw new DslError(`Artboard ${frame.name} must return exactly one root element, got ${roots.length}.`);
   }
-  const root = roots[0];
-  if (opts.group !== false) groupComponents(root);
-  return { root, unmount: () => scene.unmount() };
+  return { host: roots[0], variants, unmount: () => scene.unmount() };
 }
 
-export async function buildFrame(frame: FrameEntry): Promise<BuiltFrame> {
-  const { root, unmount } = reconcileFrame(frame, { group: false });
+/** Pass a store to read its variants back even when the build throws. */
+export async function buildFrame(frame: FrameEntry, opts: { variants?: VariantStore } = {}): Promise<BuiltFrame> {
+  const { host, variants, unmount } = reconcileFrame(frame, opts);
   const engine = await createEngine();
-  await layoutTree(root, engine);
-  groupComponents(root);
+  await layoutTree(host, engine);
   return {
     name: frame.name,
-    root,
+    root: groupComponents(host),
+    host,
+    variants,
     engine,
     dispose() {
-      releaseParagraphs(root);
+      releaseParagraphs(host);
       unmount();
     },
   };
@@ -105,7 +119,30 @@ export function errorToDiagnostic(e: unknown, file: string, frame?: string): Dia
  * Type-checks the file, builds every artboard and runs the layout checks.
  * `visit` sees each successfully built artboard before it is disposed.
  */
-export async function analyzeFile(file: string, visit?: (built: BuiltFrame, warnings: Diagnostic[]) => void): Promise<Analysis> {
+/** `--variant name=value` pairs, applied to every artboard that declares the name. */
+export type VariantPresets = [name: string, value: string][];
+
+/** One artboard's variants, recorded before it is disposed (unmounting empties the list). */
+export interface FrameVariants {
+  frame: string;
+  store: VariantStore;
+  rendered: VariantInfo[];
+}
+
+/** An error for each preset no artboard declared, listing the variants there are. */
+export function unknownVariants(presets: VariantPresets, frames: FrameVariants[]): Diagnostic[] {
+  const unknown = [...new Set(presets.map(([name]) => name))].filter((name) => !frames.some((f) => f.store.declares(name)));
+  if (unknown.length === 0) return [];
+  const available = frames.flatMap((f) => f.rendered.map((v) => `${v.name} (${f.frame})`));
+  const list = available.length ? `Available: ${available.join(", ")}.` : "None of the artboards declares a variant.";
+  return unknown.map((name) => ({ severity: "error", rule: "variant", message: `No artboard declares a variant named ${JSON.stringify(name)}. ${list}` }));
+}
+
+export async function analyzeFile(
+  file: string,
+  visit?: (built: BuiltFrame, warnings: Diagnostic[]) => void,
+  opts: { variants?: VariantPresets } = {},
+): Promise<Analysis> {
   const diagnostics: Diagnostic[] = typecheck(file);
   const result: Analysis = { diagnostics, frames: [] };
   let frames;
@@ -118,9 +155,14 @@ export async function analyzeFile(file: string, visit?: (built: BuiltFrame, warn
   if (frames.length === 0) {
     diagnostics.push({ severity: "error", rule: "dsl", message: "No exported components. Export each artboard.", source: relative(process.cwd(), resolve(file)) });
   }
+  const presets = opts.variants ?? [];
+  const seen: FrameVariants[] = [];
   for (const frame of frames) {
+    const record: FrameVariants = { frame: frame.name, store: new VariantStore(presets), rendered: [] };
+    seen.push(record);
     try {
-      const built = await buildFrame(frame);
+      const built = await buildFrame(frame, { variants: record.store });
+      record.rendered = built.variants.list();
       const warnings = checkFrame(built);
       diagnostics.push(...warnings);
       visit?.(built, warnings);
@@ -132,9 +174,10 @@ export async function analyzeFile(file: string, visit?: (built: BuiltFrame, warn
       result.frames.push({ name: frame.name, error });
     }
   }
+  diagnostics.push(...unknownVariants(presets, seen));
   return result;
 }
 
-export async function lintFile(file: string): Promise<Diagnostic[]> {
-  return (await analyzeFile(file)).diagnostics;
+export async function lintFile(file: string, opts: { variants?: VariantPresets } = {}): Promise<Diagnostic[]> {
+  return (await analyzeFile(file, undefined, opts)).diagnostics;
 }

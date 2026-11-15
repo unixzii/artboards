@@ -147,8 +147,10 @@ export interface SceneNode extends PaintableNode {
   type: string; // "Frame" | "Row" | ... | "#component" | "#text" | "#root"
   children: SceneNode[];
   parent: SceneNode | null;
-  /** Outermost-to-innermost component instances enclosing this host node before grouping. */
+  /** Host nodes only: outermost-to-innermost component instances enclosing this node. */
   componentStack?: ComponentInfo[];
+  /** Layer nodes only: the host node (owned by React) this layer stands for. Absent on `#component` wrappers. */
+  host?: SceneNode;
 }
 
 let nextId = 1;

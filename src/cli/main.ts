@@ -5,8 +5,18 @@ import { parseArgs } from "node:util";
 import { checkFrame } from "../engine/checks/layout-lint.ts";
 import { ensureTypes } from "../engine/checks/typecheck.ts";
 import { generateDocs } from "../engine/dsl/schema.ts";
-import { formatTree, toJson } from "../engine/inspect.ts";
-import { buildFrame, errorToDiagnostic, lintFile, listFrames, pickFrames } from "../engine/pipeline.ts";
+import { VariantStore } from "../engine/dsl/variants.ts";
+import { formatTree, formatVariants, toJson } from "../engine/inspect.ts";
+import {
+  buildFrame,
+  errorToDiagnostic,
+  lintFile,
+  listFrames,
+  pickFrames,
+  unknownVariants,
+  type FrameVariants,
+  type VariantPresets,
+} from "../engine/pipeline.ts";
 import { renderToPng } from "../engine/skia.ts";
 import { commentsPath, resolveFileComments, updateComment } from "../server/comments.ts";
 import { startDevServer } from "../server/dev-server.ts";
@@ -15,7 +25,8 @@ import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
 const USAGE = `Usage:
   artboards lint    <file> [--json]                              type-check, render and check every artboard
   artboards render  <file> [--frame Name] [--scale 2] [-o png]   write PNG screenshots (default: out/)
-  artboards inspect <file> [--frame Name] [--json]               layer tree with computed bounds
+  artboards inspect <file> [--frame Name] [--json]               layer tree with computed bounds and variants
+    lint, render and inspect take --variant name=value (repeatable) to render another state
   artboards dev     <file> [--port 4400] [--host 127.0.0.1]      open the viewer for human review, live-reloading
   artboards comments <file> [--all] [--resolve id] [--json]      review comments left in the viewer
   artboards docs                                                 print the DSL reference
@@ -23,6 +34,23 @@ const USAGE = `Usage:
 
 function report(diagnostics: Diagnostic[]) {
   for (const d of diagnostics) console.error(formatDiagnostic(d));
+}
+
+/** `--variant name=value` flags -> presets, or the problem with one. */
+function parseVariants(flags: string[]): VariantPresets | string {
+  const presets: VariantPresets = [];
+  for (const flag of flags) {
+    const i = flag.indexOf("=");
+    if (i <= 0) return `--variant takes name=value, got ${JSON.stringify(flag)}.`;
+    presets.push([flag.slice(0, i), flag.slice(i + 1)]);
+  }
+  return presets;
+}
+
+/** `.Step=2` for each preset this artboard declares, in flag order, safe for a file name. */
+function variantSuffix(presets: VariantPresets, store: VariantStore): string {
+  const names = [...new Set(presets.map(([name]) => name))].filter((name) => store.has(name));
+  return names.map((name) => `.${name}=${String(store.get(name))}`.replace(/[/\\:*?"<>|\s]/g, "_")).join("");
 }
 
 async function main(): Promise<number> {
@@ -37,9 +65,15 @@ async function main(): Promise<number> {
       host: { type: "string", default: "127.0.0.1" },
       all: { type: "boolean", default: false },
       resolve: { type: "string" },
+      variant: { type: "string", multiple: true, default: [] },
     },
   });
   const [command, file] = positionals;
+  const presets = parseVariants(values.variant);
+  if (typeof presets === "string") {
+    console.error(presets);
+    return 2;
+  }
 
   if (command === "docs") {
     console.log(generateDocs());
@@ -80,7 +114,7 @@ async function main(): Promise<number> {
   }
 
   if (command === "lint") {
-    const diagnostics = await lintFile(file);
+    const diagnostics = await lintFile(file, { variants: presets });
     const errors = diagnostics.filter((d) => d.severity === "error").length;
     if (values.json) {
       console.log(JSON.stringify(diagnostics, null, 2));
@@ -107,10 +141,14 @@ async function main(): Promise<number> {
 
   let failed = false;
   const json: object[] = [];
+  const seen: FrameVariants[] = [];
   for (const frame of frames) {
+    const record: FrameVariants = { frame: frame.name, store: new VariantStore(presets), rendered: [] };
+    seen.push(record);
     let built;
     try {
-      built = await buildFrame(frame);
+      built = await buildFrame(frame, { variants: record.store });
+      record.rendered = built.variants.list();
     } catch (e) {
       report([errorToDiagnostic(e, file, frame.name)]);
       failed = true;
@@ -119,27 +157,36 @@ async function main(): Promise<number> {
     const diagnostics = checkFrame(built);
     const { width, height } = built.root.layout;
     if (command === "render") {
-      const out = values.out ?? join("out", `${basename(file, extname(file))}.${frame.name}.png`);
+      const out = values.out ?? join("out", `${basename(file, extname(file))}.${frame.name}${variantSuffix(presets, built.variants)}.png`);
       mkdirSync(dirname(out), { recursive: true });
       writeFileSync(out, renderToPng(built.engine, built.root, Number(values.scale)));
       console.log(`${out}  ${width}x${height} @${values.scale}x`);
       report(diagnostics);
     } else if (values.json) {
-      json.push({ frame: frame.name, tree: toJson(built.root), diagnostics });
+      json.push({ frame: frame.name, tree: toJson(built.root), ...(record.rendered.length ? { variants: record.rendered } : {}), diagnostics });
     } else {
-      console.log(`# ${frame.name}  ${width}x${height}\n${formatTree(built.root)}`);
+      console.log(`# ${frame.name}  ${width}x${height}\n${formatVariants(record.rendered)}${formatTree(built.root)}`);
       report(diagnostics);
     }
     built.dispose();
+  }
+  const unknown = unknownVariants(presets, seen);
+  if (unknown.length) {
+    report(unknown);
+    failed = true;
   }
   if (command === "inspect" && values.json) console.log(JSON.stringify(json, null, 2));
   return failed ? 1 : 0;
 }
 
+// Set the code instead of calling process.exit: exiting at once cuts off
+// stdout that is still draining into a pipe (large `--json` output).
 main().then(
-  (code) => process.exit(code),
+  (code) => {
+    process.exitCode = code;
+  },
   (e) => {
     console.error(e);
-    process.exit(1);
+    process.exitCode = 1;
   },
 );

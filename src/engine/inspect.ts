@@ -1,6 +1,16 @@
 // Text/JSON views of a laid-out tree.
 
 import { formatPropsSummary, layerChildren, sourceOf, textContentOf, type SceneNode } from "../shared/scene.ts";
+import type { VariantInfo, VariantValue } from "./dsl/variants.ts";
+
+const showValue = (v: VariantValue) => JSON.stringify(v);
+
+/** The `variants:` block printed above an artboard's tree; empty when it has none. */
+export function formatVariants(variants: VariantInfo[]): string {
+  if (variants.length === 0) return "";
+  const lines = variants.map((v) => `  ${v.name} = ${showValue(v.value)}  (${v.options.map(showValue).join(" | ")}; initial ${showValue(v.initial)})`);
+  return `variants:\n${lines.join("\n")}\n`;
+}
 
 export function formatTree(root: SceneNode): string {
   const lines: string[] = [];

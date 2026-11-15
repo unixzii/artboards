@@ -3,9 +3,10 @@
 import { isValidElement, type ReactNode } from "react";
 import Reconciler from "react-reconciler";
 import { DefaultEventPriority } from "react-reconciler/constants.js";
-import { COMPONENT_TYPE, createNode, layerChildren, type ComponentInfo, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, createNode, layerChildren, type Box, type ComponentInfo, type SceneNode } from "../../shared/scene.ts";
 import { componentSourceOf } from "./jsx-runtime.ts";
 import { DslError, validateProps } from "./schema.ts";
+import { VariantContext } from "./variants.ts";
 
 const INTERNAL_PROPS = new Set(["key", "ref", "$source"]);
 
@@ -79,13 +80,19 @@ function componentInfoForFiber(fiber: any, name: string): ComponentInfo {
   return info;
 }
 
+/** Whether a fiber is the root, or the variant provider every artboard is wrapped in. */
+function atTop(fiber: any): boolean {
+  if (!fiber || fiber.tag === 3) return true; // HostRoot
+  return fiber.type === VariantContext && atTop(fiber.return);
+}
+
 /** Extracts the outermost-to-innermost sub-component chain enclosing a host Fiber. */
 function captureComponentStack(hostFiber: any): ComponentInfo[] | undefined {
   const stack: ComponentInfo[] = [];
   for (let f = hostFiber?.return; f; f = f.return) {
-    // Skip the top-level artboard component itself (its parent is HostRoot, tag === 3,
-    // or a MemoComponent whose parent is HostRoot).
-    const isArtboardRoot = !f.return || f.return.tag === 3 || (f.return.tag === 14 && (!f.return.return || f.return.return.tag === 3));
+    // Skip the top-level artboard component itself (rendered directly under the
+    // root, possibly through a MemoComponent).
+    const isArtboardRoot = atTop(f.return) || (f.return.tag === 14 && atTop(f.return.return));
     if (isArtboardRoot) continue;
     const name = fiberComponentName(f);
     if (name) stack.push(componentInfoForFiber(f, name));
@@ -254,48 +261,84 @@ export function createSceneRoot(): SceneRoot {
   return { root, render: update, unmount: () => update(null) };
 }
 
-function groupChildren(nodes: SceneNode[], depth: number, parent: SceneNode): SceneNode[] {
+// ------------------------------------------------------------------ layer tree
+//
+// React owns the host tree: it keeps mutating it as long as the root is
+// mounted, so nothing else may rewire it. The layer tree that inspect, lint,
+// comments and the viewer see (host nodes plus virtual `#component` wrappers,
+// coordinates relative to the wrapper) is built beside it as a fresh copy.
+
+/** Per-node text caches. They stay on the host so layout and painting share one paragraph. */
+const HOST_CACHES = ["paragraph", "runs", "fontFamilies", "missingGlyphs"] as const;
+
+/** A layer standing for a host node: its own place in the layer tree, the host's props and caches. */
+function layerOf(host: SceneNode, parent: SceneNode | null, layout: Box): SceneNode {
+  const node: SceneNode = { id: host.id, type: host.type, props: host.props, children: [], parent, layout, host };
+  for (const key of HOST_CACHES) {
+    Object.defineProperty(node, key, {
+      enumerable: true,
+      get: () => host[key],
+      set: (value) => {
+        host[key] = value;
+      },
+    });
+  }
+  // A Text's own children (raw text and <Span>s) are not layers; they are read through the host.
+  if (host.type === "Text") node.children = host.children;
+  return node;
+}
+
+/** A host node with its position in the layer being built (rebased under component wrappers). */
+interface Placed {
+  host: SceneNode;
+  layout: Box;
+}
+
+const placed = (hosts: SceneNode[]): Placed[] => hosts.map((host) => ({ host, layout: { ...host.layout } }));
+
+function groupChildren(items: Placed[], depth: number, parent: SceneNode): SceneNode[] {
   const out: SceneNode[] = [];
-  for (let i = 0; i < nodes.length; ) {
-    const comp = nodes[i].componentStack?.[depth];
+  for (let i = 0; i < items.length; ) {
+    const comp = items[i].host.componentStack?.[depth];
     if (!comp) {
-      const node = nodes[i++];
-      node.parent = parent;
-      if (node.type !== "Text") {
-        node.children = groupChildren(layerChildren(node), depth, node);
-      }
+      const { host, layout } = items[i++];
+      const node = layerOf(host, parent, layout);
+      if (host.type !== "Text") node.children = groupChildren(placed(layerChildren(host)), depth, node);
       out.push(node);
       continue;
     }
 
-    const run: SceneNode[] = [nodes[i++]];
-    while (i < nodes.length && nodes[i].componentStack?.[depth] === comp) {
-      run.push(nodes[i++]);
+    const run: Placed[] = [items[i++]];
+    while (i < items.length && items[i].host.componentStack?.[depth] === comp) {
+      run.push(items[i++]);
     }
 
     const x0 = Math.min(...run.map((c) => c.layout.x));
     const y0 = Math.min(...run.map((c) => c.layout.y));
     const x1 = Math.max(...run.map((c) => c.layout.x + c.layout.width));
     const y1 = Math.max(...run.map((c) => c.layout.y + c.layout.height));
-    for (const c of run) {
-      c.layout = { x: c.layout.x - x0, y: c.layout.y - y0, width: c.layout.width, height: c.layout.height };
-    }
+    const rebased = run.map(({ host, layout }) => ({
+      host,
+      layout: { x: layout.x - x0, y: layout.y - y0, width: layout.width, height: layout.height },
+    }));
 
     const wrapper = createNode(COMPONENT_TYPE, comp.source ? { $source: comp.source } : {});
     wrapper.component = { name: comp.name, props: comp.props, source: comp.source };
     wrapper.layout = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
     wrapper.parent = parent;
-    wrapper.children = groupChildren(run, depth + 1, wrapper);
+    wrapper.children = groupChildren(rebased, depth + 1, wrapper);
     out.push(wrapper);
   }
   return out;
 }
 
 /**
- * Materializes virtual `#component` nodes from the recorded Fiber stacks on a
- * laid-out (or freshly reconciled) artboard root, rebasing child coordinates.
+ * Builds the layer tree of a laid-out (or freshly reconciled) artboard: virtual
+ * `#component` nodes materialized from the recorded Fiber stacks, child
+ * coordinates rebased onto them. The host tree is left untouched.
  */
-export function groupComponents(root: SceneNode) {
-  if (root.type === "Text") return;
-  root.children = groupChildren(layerChildren(root), 0, root);
+export function groupComponents(root: SceneNode): SceneNode {
+  const layer = layerOf(root, null, { ...root.layout });
+  if (root.type !== "Text") layer.children = groupChildren(placed(layerChildren(root)), 0, layer);
+  return layer;
 }

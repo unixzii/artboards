@@ -1,5 +1,5 @@
 // Customer app (iPhone, 390 x 844): browse, customise, pay, track, membership.
-import { Column, Ellipse, Frame, Grid, Image, Path, Rect, Row, Span, Text } from "artboards";
+import { Column, Ellipse, Frame, Grid, Image, Path, Rect, Row, Span, Text, useVariant } from "artboards";
 import type { ReactNode } from "react";
 import {
   Avatar,
@@ -438,38 +438,39 @@ export function Checkout() {
 
 // ------------------------------------------------------------------ tracking
 
-const STEPS: [string, "done" | "active" | "todo"][] = [
-  ["已下单", "done"],
-  ["制作中", "active"],
-  ["待取餐", "todo"],
-  ["已完成", "todo"],
-];
+const STEPS = ["已下单", "制作中", "待取餐", "已完成"];
+/** Where the progress line stops for each step: just past that step's circle. */
+const STEP_PROGRESS = [0.04, 0.38, 0.71, 1];
+const STEP_ICONS: IconName[] = ["receipt", "coffee", "shoppingBag", "check"];
 
-function Steps() {
+function Steps({ current }: { current: number }) {
   return (
     <Frame name="Steps" width="fill" height={54}>
       <Row x={30} right={30} y={13} height={3}>
-        <ProgressBar value={0.38} height={3} tint={color.sage} />
+        <ProgressBar value={STEP_PROGRESS[current]} height={3} tint={color.sage} />
       </Row>
       <Row width="fill" justify="space-between">
-        {STEPS.map(([label, state]) => (
-          <Column key={label} width={60} gap={8} align="center">
-            {state === "done" && (
-              <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.sage}>
-                <Icon name="check" size={16} tint={color.white} weight={2.6} />
-              </Row>
-            )}
-            {state === "active" && (
-              <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.caramel} stroke="rgba(196, 119, 59, 0.25)" strokeWidth={6} strokeAlign="outside">
-                <Icon name="coffee" size={15} tint={color.white} weight={2.4} />
-              </Row>
-            )}
-            {state === "todo" && <Rect width={28} height={28} cornerRadius={14} fill={color.foam} stroke={color.oatStrong} strokeWidth={2} strokeAlign="inside" />}
-            <Text fontSize={12} fontWeight={state === "todo" ? 400 : 700} color={state === "todo" ? color.muted : color.espresso}>
-              {label}
-            </Text>
-          </Column>
-        ))}
+        {STEPS.map((label, i) => {
+          const state = i < current ? "done" : i === current ? "active" : "todo";
+          return (
+            <Column key={label} width={60} gap={8} align="center">
+              {state === "done" && (
+                <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.sage}>
+                  <Icon name="check" size={16} tint={color.white} weight={2.6} />
+                </Row>
+              )}
+              {state === "active" && (
+                <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.caramel} stroke="rgba(196, 119, 59, 0.25)" strokeWidth={6} strokeAlign="outside">
+                  <Icon name={STEP_ICONS[i]} size={15} tint={color.white} weight={2.4} />
+                </Row>
+              )}
+              {state === "todo" && <Rect width={28} height={28} cornerRadius={14} fill={color.foam} stroke={color.oatStrong} strokeWidth={2} strokeAlign="inside" />}
+              <Text fontSize={12} fontWeight={state === "todo" ? 400 : 700} color={state === "todo" ? color.muted : color.espresso}>
+                {label}
+              </Text>
+            </Column>
+          );
+        })}
       </Row>
     </Frame>
   );
@@ -508,6 +509,7 @@ function MapView() {
 }
 
 export function OrderTracking() {
+  const [step] = useVariant("步骤", [0, 1, 2, 3], 1);
   return (
     <Phone>
       <MapView />
@@ -540,7 +542,7 @@ export function OrderTracking() {
             </Text>
           </Column>
         </Row>
-        <Steps />
+        <Steps current={step} />
         <Row padding={12} gap={12} align="center" cornerRadius={radius.lg} fill={color.white} shadow={shadow.card}>
           <Avatar initials="JC" size={40} />
           <Column width="fill" gap={2}>
