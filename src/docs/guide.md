@@ -122,6 +122,9 @@ Scrolling is the viewer's own state: components never see it, and screenshots sh
 - `artboards comments <file>` — open review comments from a human, with the source line of each layer.
   After addressing one, run `artboards comments <file> --resolve <id>`.
 - `artboards dev <file>` — start the viewer a human uses to review and comment (long-running).
+- `artboards build <file> [-o dir]` — write the viewer and the design as a static site (default: `out/<file>/`),
+  for reviewers without the CLI. Their comments stay in their browser until they export them; add an exported
+  file with `artboards comments <file> --import <name>.comments.json`.
 
 ## Not in the DSL
 

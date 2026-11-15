@@ -8,7 +8,7 @@ import type { RenderEngine } from "../../shared/engine.ts";
 import type { BuildPayload, Comment, ResolvedComment } from "../../shared/protocol.ts";
 import type { SceneNode } from "../../shared/scene.ts";
 import { DesignHost } from "../runtime/host.ts";
-import * as api from "./api.ts";
+import type { Backend } from "./backend.ts";
 import { buildModel, clickHandler, describe, EMPTY_MODEL, nodeKey, scrollNode, scrollTarget, toLayer, type ViewFrame, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
 
@@ -44,6 +44,8 @@ export interface ViewerState {
   measuring: boolean;
   /** Both side panels are hidden, leaving the canvas the whole window. */
   panelsHidden: boolean;
+  /** "static": a site from `artboards build`; comments stay in this browser until exported. */
+  mode: Backend["mode"];
 }
 
 export interface StageElements {
@@ -88,8 +90,10 @@ export class Viewer {
     scrollTick: 0,
     measuring: false,
     panelsHidden: false,
+    mode: "dev",
   });
-  private createBackend: StageBackendFactory;
+  private backend: Backend;
+  private createStage: StageBackendFactory;
   private host: DesignHost;
   private renderer: StageBackend | null = null;
   /** Whether the view has been fitted to the first scene that had artboards. */
@@ -103,14 +107,16 @@ export class Viewer {
   /** Scroll offsets by layer key; viewer state only, kept across rebuilds and tools. */
   private scrolls = new Map<string, Point>();
 
-  constructor(engine: RenderEngine, createBackend: StageBackendFactory) {
-    this.createBackend = createBackend;
+  constructor(engine: RenderEngine, backend: Backend, createStage: StageBackendFactory) {
+    this.backend = backend;
+    this.createStage = createStage;
+    this.store.set({ mode: backend.mode });
     this.host = new DesignHost(engine, () => this.syncScene());
   }
 
   /** Binds to the stage elements and starts receiving builds. Returns the teardown. */
   attach(els: StageElements): () => void {
-    const renderer = this.createBackend(els, (s) => this.store.set({ zoom: Math.round(s * 100) }));
+    const renderer = this.createStage(els, (s) => this.store.set({ zoom: Math.round(s * 100) }));
     this.renderer = renderer;
 
     const onBuild = (payload: BuildPayload) => {
@@ -141,8 +147,7 @@ export class Viewer {
       if (this.store.get().ready) this.store.set({ comments: this.resolvedComments() });
     };
 
-    api.fetchBuild().then(onBuild).catch((e) => console.error(e));
-    const unsubscribe = api.subscribeEvents({ onBuild, onTypecheck, onComments });
+    const unsubscribe = this.backend.connect({ onBuild, onTypecheck, onComments });
     return () => {
       unsubscribe();
       this.host.dispose();
@@ -366,7 +371,7 @@ export class Viewer {
     const { draft } = this.store.get();
     const node = this.node(draft?.key ?? null);
     if (!draft || !node || !text.trim()) return false;
-    const ok = await api.postComment({
+    const ok = await this.backend.addComment({
       frame: node.frame.name,
       path: node.path,
       nodeType: node.type,
@@ -383,6 +388,16 @@ export class Viewer {
     if (comment.attached) this.select(nodeKey(comment.frame, comment.path), { reveal: true });
   }
 
-  setCommentResolved = api.setCommentResolved;
-  deleteComment = api.deleteComment;
+  setCommentResolved(id: number, resolved: boolean) {
+    void this.backend.setCommentResolved(id, resolved);
+  }
+
+  deleteComment(id: number) {
+    void this.backend.deleteComment(id);
+  }
+
+  /** Static sites only: downloads the comments to send back to the designer. */
+  exportComments() {
+    this.backend.exportComments?.();
+  }
 }

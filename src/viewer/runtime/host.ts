@@ -134,7 +134,7 @@ export class DesignHost {
     return this.queue;
   }
 
-  /** Imports a newly built `/design.js?v=<version>` bundle and mounts all artboards. */
+  /** Imports a newly built `design.js?v=<version>` bundle and mounts all artboards. */
   loadBundle(version: number, file: string): Promise<void> {
     return this.enqueue(async () => {
       this.clear();
@@ -143,7 +143,7 @@ export class DesignHost {
 
       let exports: Record<string, unknown>;
       try {
-        const url = `/design.js?v=${version}`;
+        const url = new URL(`design.js?v=${version}`, document.baseURI).href;
         exports = await import(url);
       } catch (e) {
         const meta = (globalThis as any)[BUNDLE_META_GLOBAL] as BundleMeta | undefined;

@@ -16,10 +16,14 @@ export function fontDir(slug: string): string | undefined {
   return pack && join(dirname(require.resolve(`${pack.pkg}/package.json`)), "files");
 }
 
+/** Every bundled font file (`/fonts/<pack>/<file>`) read so far, for `artboards build`. */
+export const usedFontFiles = new Set<string>();
+
 export function createNodeFonts(ck: CanvasKit): FontSet {
   return new FontSet(ck, (url) => {
     let m = /^\/fonts\/([a-z0-9-]+)\/([a-z0-9-]+\.woff2)$/.exec(url);
     if (m) {
+      usedFontFiles.add(url);
       const dir = fontDir(m[1]);
       if (!dir) return undefined;
       const bytes = readFileSync(join(dir, m[2]));

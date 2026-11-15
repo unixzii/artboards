@@ -2,7 +2,7 @@
 // `<name>.comments.json` so the agent can read them with `artboards comments`.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolveComment, type Comment, type NewComment, type ResolvedComment } from "../shared/comments.ts";
+import { appendNew, createComment, resolveComment, type Comment, type NewComment, type ResolvedComment } from "../shared/comments.ts";
 import { extractFrames, reconcileFrame } from "../shared/dsl/frame.ts";
 import { groupComponents } from "../shared/dsl/reconciler.ts";
 import { loadDesign } from "./bundler.ts";
@@ -22,19 +22,22 @@ function writeComments(file: string, comments: Comment[]) {
 
 export function addComment(file: string, input: NewComment): Comment {
   const comments = readComments(file);
-  const comment: Comment = {
-    id: comments.reduce((max, c) => Math.max(max, c.id), 0) + 1,
-    frame: String(input.frame),
-    path: String(input.path),
-    nodeType: String(input.nodeType),
-    hint: input.hint ? String(input.hint) : undefined,
-    point: { x: Math.round(Number(input.point?.x) || 0), y: Math.round(Number(input.point?.y) || 0) },
-    text: String(input.text).trim(),
-    createdAt: new Date().toISOString(),
-    resolved: false,
-  };
+  const comment = createComment(input, comments);
   writeComments(file, [...comments, comment]);
   return comment;
+}
+
+/**
+ * Adds the comments of an exported file (from the viewer of a site built with
+ * `artboards build`) that this design does not have yet. Returns how many were added.
+ */
+export function importComments(file: string, exported: string): number {
+  const incoming = JSON.parse(readFileSync(exported, "utf8"));
+  if (!Array.isArray(incoming)) throw new Error(`${exported} is not a comments file: expected a JSON array.`);
+  const comments = readComments(file);
+  const merged = appendNew(comments, incoming as Comment[]);
+  if (merged.length > comments.length) writeComments(file, merged);
+  return merged.length - comments.length;
 }
 
 /** Returns false when no comment has that id. */

@@ -32,6 +32,11 @@ export function importAsset(absPath: string): AssetRef {
   return Object.freeze({ $asset: kind, id, file: relative(process.cwd(), absPath) });
 }
 
+/** Every asset imported so far, by id. */
+export function registeredAssets(): ReadonlyMap<string, string> {
+  return paths;
+}
+
 /** Absolute path of a registered asset, or undefined. */
 export function assetPath(id: string): string | undefined {
   return paths.get(id);

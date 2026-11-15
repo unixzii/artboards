@@ -32,6 +32,35 @@ export interface ResolvedComment extends Comment {
   target?: string;
 }
 
+/** Builds a stored comment from what the viewer sent, numbered after the existing ones. */
+export function createComment(input: NewComment, existing: readonly Comment[]): Comment {
+  return {
+    id: nextId(existing),
+    frame: String(input.frame),
+    path: String(input.path),
+    nodeType: String(input.nodeType),
+    hint: input.hint ? String(input.hint) : undefined,
+    point: { x: Math.round(Number(input.point?.x) || 0), y: Math.round(Number(input.point?.y) || 0) },
+    text: String(input.text).trim(),
+    createdAt: new Date().toISOString(),
+    resolved: false,
+  };
+}
+
+const nextId = (comments: readonly Comment[]) => comments.reduce((max, c) => Math.max(max, c.id), 0) + 1;
+
+/** Whether two comments are copies of one: ids differ between copies, so match on when and what was written. */
+export const sameComment = (a: Comment, b: Comment) => a.createdAt === b.createdAt && a.frame === b.frame && a.text === b.text;
+
+/** `into` plus the comments of `incoming` it does not have yet, renumbered after its own. */
+export function appendNew(into: readonly Comment[], incoming: readonly Comment[]): Comment[] {
+  const out = [...into];
+  for (const c of incoming) {
+    if (!out.some((o) => sameComment(o, c))) out.push({ ...c, id: nextId(out) });
+  }
+  return out;
+}
+
 export function describeNode(n: SceneNode): string {
   if (n.component) {
     const summary = formatPropsSummary(n.component.props);

@@ -115,6 +115,15 @@ function packSubsets(pack: FontPack): Subset[] {
   return subsets;
 }
 
+/** Files of a bundled pack, at the file for one weight and style, whose subsets cover any of the code points. */
+export function packFilesFor(slug: string, weight: number, italic: boolean, codePoints: ReadonlySet<number>): string[] {
+  const pack = PACKS.find((p) => p.slug === slug);
+  if (!pack) return [];
+  return packSubsets(pack)
+    .filter((s) => [...codePoints].some((cp) => s.covers(cp)))
+    .map((s) => s.fileFor(weight, italic));
+}
+
 // ------------------------------------------------------------- custom families
 
 export interface CustomFace {

@@ -14,6 +14,8 @@ export interface SectionProps {
   defaultHeight?: number;
   minHeight?: number;
   maxHeight?: number;
+  /** Buttons at the right end of the header, e.g. "Export". */
+  actions?: ReactNode;
   children: ReactNode;
 }
 
@@ -26,6 +28,7 @@ export function Section({
   defaultHeight = 220,
   minHeight = 96,
   maxHeight = 560,
+  actions,
   children,
 }: SectionProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
@@ -40,7 +43,7 @@ export function Section({
 
   const onReset = useCallback(() => setHeight(defaultHeight), [defaultHeight]);
 
-  const className = ["panel-section", collapsed && "is-collapsed", resizable && "is-resizable"].filter(Boolean).join(" ");
+  const className = ["panel-section", collapsed && "is-collapsed", resizable && "is-resizable", actions && "has-actions"].filter(Boolean).join(" ");
   const style = resizable && !collapsed ? ({ "--section-h": `${height}px` } as CSSProperties) : undefined;
 
   return (
@@ -55,6 +58,7 @@ export function Section({
           </span>
         )}
       </button>
+      {actions && <div className="section-actions">{actions}</div>}
       {!collapsed && (
         <div id={id} className="scroll">
           {children}

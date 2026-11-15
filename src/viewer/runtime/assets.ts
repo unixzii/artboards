@@ -38,7 +38,8 @@ export function createBrowserEngine(ck: CanvasKit): RenderEngine {
   const fetchBytes = (url: string) => {
     let p = downloads.get(url);
     if (!p) {
-      p = fetch(url)
+      // Font and asset keys are site-absolute ("/fonts/..."); fetch them relative to the page.
+      p = fetch(url.replace(/^\//, ""))
         .then((r) => (r.ok ? r.arrayBuffer() : undefined))
         .catch((e) => {
           console.warn("asset failed to load:", url, e);

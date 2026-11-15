@@ -6,7 +6,7 @@ import pkg from "../../package.json" with { type: "json" };
 import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
 import { VariantStore } from "../shared/dsl/variants.ts";
 import { checkFrame } from "../shared/layout-lint.ts";
-import { commentsPath, resolveFileComments, updateComment } from "./comments-store.ts";
+import { commentsPath, importComments, resolveFileComments, updateComment } from "./comments-store.ts";
 import { startDevServer } from "./dev-server.ts";
 import { distFile } from "./dist.ts";
 import { formatTree, formatVariants, toJson } from "./inspect.ts";
@@ -20,6 +20,7 @@ import {
   type FrameVariants,
   type VariantPresets,
 } from "./pipeline.ts";
+import { buildSite, OutDirError } from "./build.ts";
 import { renderToPng } from "./skia.ts";
 import { err, out } from "./style.ts";
 
@@ -158,7 +159,41 @@ async function dev(file: string, opts: { port: number; host: string }): Promise<
   return new Promise<number>(() => {}); // runs until interrupted
 }
 
-async function comments(file: string, opts: { all?: true; resolve?: number; json?: true }): Promise<number> {
+async function build(file: string, opts: { out?: string }): Promise<number> {
+  const dir = opts.out ?? join("out", basename(file, extname(file)));
+  let site;
+  try {
+    site = await buildSite(file, dir);
+  } catch (e) {
+    if (e instanceof OutDirError) throw new UsageError(e.message);
+    throw e;
+  }
+  if ("errors" in site) {
+    report(site.errors);
+    return 1;
+  }
+  report(site.typeErrors);
+  const exported = basename(commentsPath(file));
+  console.log(
+    [
+      `${out("green", `Built ${dir}/`)}  ${out("dim", `${site.files} files, ${(site.bytes / 1e6).toFixed(1)} MB`)}`,
+      ...(site.typeErrors.length ? [out("yellow", `${site.typeErrors.length} type error(s); the site lists them under Problems.`)] : []),
+      "",
+      "Serve the directory with any static file server, e.g.",
+      `  npx serve ${dir}`,
+      `Reviewers' comments stay in their browser until they export them as ${exported}. Add them here with`,
+      `  artboards comments ${file} --import ${exported}`,
+    ].join("\n"),
+  );
+  return 0;
+}
+
+async function comments(file: string, opts: { all?: true; resolve?: number; import?: string; json?: true }): Promise<number> {
+  if (opts.import !== undefined) {
+    const added = importComments(file, opts.import);
+    console.log(added ? out("green", `Added ${added} comment(s) to ${commentsPath(file)}.`) : "No new comments in that file.");
+    return 0;
+  }
   if (opts.resolve !== undefined) {
     const ok = updateComment(file, opts.resolve, { resolved: true });
     if (ok) console.log(out("green", `Resolved comment #${opts.resolve}.`));
@@ -208,6 +243,7 @@ Examples:
   $ artboards render design.tsx -f Home --scale 2      screenshot one artboard at 2x
   $ artboards inspect design.tsx --variant Step=2      layer tree of another state
   $ artboards dev design.tsx                           open the review viewer
+  $ artboards build design.tsx                         a static site for reviewers
   $ artboards docs                                     the DSL reference`,
   );
 
@@ -247,11 +283,19 @@ program
   .action(run(dev));
 
 program
+  .command("build")
+  .description("write the design as a static site to review without a server; comments stay in each reviewer's browser until exported")
+  .argument("<file>", "design file (.jsx/.tsx)")
+  .addOption(new Option("-o, --out <dir>", "directory to write the site to (default: out/<file>)"))
+  .action(run(build));
+
+program
   .command("comments")
   .description("list review comments left in the viewer, with the source line of each layer")
   .argument("<file>", "design file (.jsx/.tsx)")
   .addOption(new Option("--all", "include resolved comments"))
   .addOption(new Option("--resolve <id>", "mark a comment as addressed").argParser(commentId))
+  .addOption(new Option("--import <json>", "add the comments of a file exported from a site made by `build`").conflicts("resolve"))
   .addOption(jsonOption("the comments"))
   .action(run(comments));
 

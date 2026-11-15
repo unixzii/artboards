@@ -180,6 +180,10 @@ svg.lucide { flex: none; display: block; }
   flex: none;
 }
 .section-header:hover { color: var(--text); background: var(--hover); }
+/* Header buttons sit over the header's right end; the header leaves room for them. */
+.has-actions > .section-header { padding-right: 40px; }
+.section-actions { position: absolute; top: 0; right: 6px; height: 30px; display: flex; align-items: center; }
+.section-actions .group.plain button { width: 24px; height: 24px; }
 .section-chevron { display: inline-grid; place-items: center; width: 14px; height: 14px; flex: none; }
 .section-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { font-weight: 400; text-transform: none; letter-spacing: 0; }
