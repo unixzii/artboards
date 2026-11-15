@@ -3,5 +3,11 @@
   "framework": null,
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm run build:site",
-  "outputDirectory": "out/site"
+  "outputDirectory": "out/site",
+  "headers": [
+    {
+      "source": "/(canvaskit|taffy|fonts)/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }]
+    }
+  ]
 }

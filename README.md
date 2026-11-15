@@ -9,6 +9,8 @@ trees. It also opens a browser viewer where people review the designs and leave 
 It was built for coding agents. An agent can write a design, check it with `lint`, look at it with
 `render`, and fix whatever a reviewer commented on.
 
+The [website](https://artboards.cy4n.dev), is itself a design made with [artboards](examples/artboards/site.tsx)!
+
 ```tsx
 import { Column, Frame, Row, Text } from "artboards";
 
