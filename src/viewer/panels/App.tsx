@@ -8,6 +8,11 @@ import { Problems } from "./Problems.tsx";
 import { Properties } from "./Properties.tsx";
 import { Toolbar } from "./Toolbar.tsx";
 
+/** The title index.html ships with. */
+const DEFAULT_TITLE = "Artboards";
+/** A page given its own title (a site published from `artboards build`) keeps it instead of the file name. */
+const titledPage = document.title !== DEFAULT_TITLE;
+
 export function App() {
   const file = useViewerState((s) => s.file);
   const hasSelection = useViewerState((s) => s.selected !== null);
@@ -15,7 +20,7 @@ export function App() {
   const panelsHidden = useViewerState((s) => s.panelsHidden);
 
   useEffect(() => {
-    document.title = file ? `${file} — Artboards` : "Artboards";
+    if (!titledPage) document.title = file ? `${file} — ${DEFAULT_TITLE}` : DEFAULT_TITLE;
   }, [file]);
   // Lets automation wait for the first scene.
   useEffect(() => {
