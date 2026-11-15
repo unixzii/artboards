@@ -4,7 +4,7 @@
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
-import { expandSides, layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, expandSides, layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   /** "<artboard>/<path>", stable across rebuilds. */
@@ -229,6 +229,57 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
     return frame;
   });
   return { frames, nodes };
+}
+
+export type Sizing = "Fixed" | "Fill" | "Hug";
+
+/**
+ * How the layout engine sized one axis of the node, following the rules in
+ * shared/layout.ts: a number is fixed, `"fill"` fills, and an unsized side
+ * fills when its parent stretches it (cross axis, Grid cell, or pinned to both
+ * edges) and hugs otherwise. Null when the size is derived from the other side
+ * (an Image keeping its aspect ratio).
+ */
+export function sizing(node: ViewNode, axis: "width" | "height"): Sizing | null {
+  // A component instance is a wrapper with no props of its own: read the layer it renders.
+  let host = node;
+  while (host.type === COMPONENT_TYPE && host.children.length === 1) host = host.children[0];
+  if (host.type === COMPONENT_TYPE) return null;
+  const p = host.props;
+  const v = p[axis];
+  if (typeof v === "number") return "Fixed";
+  if (v === "fill") return "Fill";
+  const other = p[axis === "width" ? "height" : "width"];
+  if (host.type === "Image" && typeof other === "number") return null;
+  // Likewise, the container laying it out is the nearest ancestor that isn't a wrapper.
+  let parent = host.parent;
+  while (parent?.type === COMPONENT_TYPE) parent = parent.parent;
+  if (!parent) return "Hug";
+  const kind = parent.type === "Row" ? "row" : parent.type === "Column" ? "column" : parent.type === "Grid" ? "grid" : "free";
+  if (kind === "free" || p.absolute === true) {
+    const pinned = axis === "width" ? p.x != null && p.right != null : p.y != null && p.bottom != null;
+    return pinned ? "Fill" : "Hug";
+  }
+  if (kind === "grid") {
+    const align = axis === "width" ? (parent.props.justify ?? "stretch") : (p.alignSelf ?? parent.props.align ?? "stretch");
+    return align === "stretch" ? "Fill" : "Hug";
+  }
+  const cross = (kind === "row") === (axis === "height");
+  return cross && (p.alignSelf ?? parent.props.align ?? "start") === "stretch" ? "Fill" : "Hug";
+}
+
+/** The bottom-centre of the node's on-canvas box (rotation included), in canvas coordinates. */
+export function bottomCenter(node: ViewNode): Point {
+  const [a, b, c, d, e, f] = node.matrix;
+  const { width: w, height: h } = node.layout;
+  const corners = [
+    [0, 0],
+    [w, 0],
+    [0, h],
+    [w, h],
+  ].map(([x, y]) => ({ x: a * x + c * y + e, y: b * x + d * y + f }));
+  const xs = corners.map((q) => q.x);
+  return { x: node.frame.x + (Math.min(...xs) + Math.max(...xs)) / 2, y: node.frame.y + Math.max(...corners.map((q) => q.y)) };
 }
 
 export function bounds(frames: ViewFrame[]) {

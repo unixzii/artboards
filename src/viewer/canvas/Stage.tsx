@@ -5,7 +5,7 @@
 import { ChevronRight, Component, RotateCcw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useViewer, useViewerState } from "../core/context.ts";
-import { describe, pinPosition, type ViewFrame } from "../core/model.ts";
+import { bottomCenter, describe, pinPosition, sizing, type ViewFrame, type ViewNode } from "../core/model.ts";
 import { anchor } from "./anchor.ts";
 import { attachInput } from "./input.ts";
 
@@ -85,6 +85,27 @@ function Pins() {
         )
       );
     });
+}
+
+function sizeText(node: ViewNode, axis: "width" | "height") {
+  const mode = sizing(node, axis);
+  const value = Math.round(node.layout[axis] * 100) / 100;
+  return mode && mode !== "Fixed" ? `${value} ${mode}` : String(value);
+}
+
+/** "182 Fill × 20 Hug" under the selected layer. Artboards show their size in the title instead. */
+function SizeBadge() {
+  const viewer = useViewer();
+  const selected = useViewerState((s) => s.selected);
+  useViewerState((s) => s.model); // the selected key can point at a new node after a rebuild
+  useViewerState((s) => s.scrollTick); // follows layers that scroll
+  const node = viewer.node(selected);
+  if (!node?.parent) return null;
+  return (
+    <div className={`anchored size-badge${node.component ? " comp" : ""}`} style={anchor(bottomCenter(node))}>
+      {sizeText(node, "width")} × {sizeText(node, "height")}
+    </div>
+  );
 }
 
 function Notice() {
@@ -167,6 +188,7 @@ export function Stage() {
         {frames.map((frame) => (
           <FrameLabel key={frame.name} frame={frame} />
         ))}
+        <SizeBadge />
         <Pins />
         <CommentBox />
       </div>

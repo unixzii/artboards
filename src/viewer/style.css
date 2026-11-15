@@ -382,6 +382,20 @@ svg.lucide { flex: none; display: block; }
 .frame-label.failed { width: calc(var(--s) * var(--w) * 1px); height: calc(var(--s) * var(--h) * 1px); max-width: none; padding: 8px 10px; overflow: hidden; color: var(--error); cursor: default; }
 .frame-label .failed-head { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
 .frame-label .err { display: block; margin-top: 6px; white-space: normal; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+/* Matches the canvas selection outline (renderer.ts), which keeps one color in both schemes. */
+.size-badge {
+  --shift: translate(-50%, 6px);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.size-badge.comp { background: #7c3aed; }
 .pin {
   margin: -22px 0 0 0;
   width: 22px;
