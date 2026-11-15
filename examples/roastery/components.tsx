@@ -52,6 +52,7 @@ export function Button({
   width,
   disabled = false,
   pressed = false,
+  onClick,
 }: {
   children: ReactNode;
   variant?: ButtonVariant;
@@ -60,6 +61,7 @@ export function Button({
   width?: Size;
   disabled?: boolean;
   pressed?: boolean;
+  onClick?: () => void;
 }) {
   const v = BUTTON[variant];
   const h = size === "lg" ? 52 : size === "sm" ? 32 : 44;
@@ -80,6 +82,7 @@ export function Button({
       strokeAlign="inside"
       opacity={disabled ? 0.4 : 1}
       shadow={variant === "primary" && !disabled && !pressed ? { y: 4, blur: 12, color: "rgba(91, 52, 32, 0.28)" } : undefined}
+      onClick={disabled ? undefined : onClick}
     >
       {icon && <Icon name={icon} size={size === "sm" ? 14 : 18} tint={v.text} />}
       <Text fontSize={fs} fontWeight={600} color={v.text}>
@@ -164,17 +167,19 @@ export function Price({ value, was, size = 20, tint = color.espresso }: { value:
   );
 }
 
-export function Stepper({ value, compact = false }: { value: number; compact?: boolean }) {
+/** Quantity control. `onChange` gets the new value; minus stops at `min`. */
+export function Stepper({ value, compact = false, min = 0, onChange }: { value: number; compact?: boolean; min?: number; onChange?: (value: number) => void }) {
   const s = compact ? 24 : 30;
+  const atMin = value <= min;
   return (
     <Row name="Stepper" gap={compact ? 8 : 12} align="center">
-      <Row width={s} height={s} align="center" justify="center" cornerRadius={s / 2} stroke={color.oatStrong} strokeAlign="inside">
+      <Row width={s} height={s} align="center" justify="center" cornerRadius={s / 2} stroke={color.oatStrong} strokeAlign="inside" opacity={atMin ? 0.4 : 1} onClick={onChange && !atMin ? () => onChange(value - 1) : undefined}>
         <Icon name="minus" size={compact ? 12 : 14} />
       </Row>
       <Text width={compact ? 14 : 18} textAlign="center" fontSize={compact ? 14 : 16} fontWeight={600} tabularNums color={color.espresso}>
         {value}
       </Text>
-      <Row width={s} height={s} align="center" justify="center" cornerRadius={s / 2} fill={color.roast}>
+      <Row width={s} height={s} align="center" justify="center" cornerRadius={s / 2} fill={color.roast} onClick={onChange && (() => onChange(value + 1))}>
         <Icon name="plus" size={compact ? 12 : 14} tint={color.white} />
       </Row>
     </Row>
@@ -410,9 +415,10 @@ export function Phone({ children, fill = color.crema }: { children: ReactNode; f
 
 // ------------------------------------------------------------------ product
 
-export function ProductCard({ product, count = 0 }: { product: Product; count?: number }) {
+/** `onOpen` fires on the card, `onCount` on its add button and stepper with the new count. */
+export function ProductCard({ product, count = 0, onOpen, onCount }: { product: Product; count?: number; onOpen?: () => void; onCount?: (count: number) => void }) {
   return (
-    <Column name="ProductCard" padding={8} gap={10} fill={color.white} cornerRadius={radius.lg} shadow={shadow.card} align="stretch">
+    <Column name="ProductCard" padding={8} gap={10} fill={color.white} cornerRadius={radius.lg} shadow={shadow.card} align="stretch" onClick={onOpen}>
       <Frame width="fill" height={132} cornerRadius={12} clip>
         <Image src={product.image} width="fill" height="fill" />
         {product.tag && (
@@ -434,9 +440,9 @@ export function ProductCard({ product, count = 0 }: { product: Product; count?: 
       <Row padding={[0, 4, 4, 4]} align="center" justify="space-between">
         <Price value={product.price} size={17} />
         {count > 0 ? (
-          <Stepper value={count} compact />
+          <Stepper value={count} compact onChange={onCount} />
         ) : (
-          <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.roast}>
+          <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.roast} onClick={onCount && (() => onCount(1))}>
             <Icon name="plus" size={16} tint={color.white} weight={2.4} />
           </Row>
         )}

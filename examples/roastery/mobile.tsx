@@ -19,16 +19,32 @@ import {
   StatusBar,
   Stepper,
   TabBar,
+  type Tone,
 } from "./components.tsx";
-import { byId, images, products, yuan } from "./data.ts";
-import type { IconName } from "./icons.ts";
+import {
+  CATEGORIES,
+  PROMO,
+  SAMPLE_CART,
+  addLine,
+  byId,
+  cartTotals,
+  images,
+  initialPicks,
+  lineFor,
+  products,
+  setQty,
+  summarize,
+  unitPrice,
+  yuan,
+  type CartLine,
+  type Picks,
+  type Product,
+} from "./data.ts";
+import { ICONS, type IconName } from "./icons.ts";
 import { color, font, radius, shadow } from "./tokens.ts";
 
 /** Backdrop colour of the latte photo, sampled from its left edge. */
 const PROMO_BG = "#e4ccb5";
-
-/** Member card: near-black roast with a single brass accent. */
-const CARD = { bg: "#1e1510", edge: "rgba(255, 236, 214, 0.08)", text: "#f6efe6", muted: "#ab9888", brass: "#c9a46a" };
 
 // ------------------------------------------------------------------ pieces
 
@@ -40,9 +56,9 @@ function Card({ children, padding = 16, gap = 12 }: { children: ReactNode; paddi
   );
 }
 
-function RoundButton({ icon, light = false, badge = false }: { icon: IconName; light?: boolean; badge?: boolean }) {
+function RoundButton({ icon, light = false, badge = false, onClick }: { icon: IconName; light?: boolean; badge?: boolean; onClick?: () => void }) {
   return (
-    <Row width={40} height={40} align="center" justify="center" cornerRadius={20} fill={light ? "rgba(255, 255, 255, 0.92)" : color.white} shadow={shadow.card}>
+    <Row width={40} height={40} align="center" justify="center" cornerRadius={20} fill={light ? "rgba(255, 255, 255, 0.92)" : color.white} shadow={shadow.card} onClick={onClick}>
       <Icon name={icon} size={20} />
       {badge && <Ellipse absolute right={9} y={9} width={9} height={9} fill={color.tomato} stroke={color.white} strokeWidth={2} strokeAlign="outside" />}
     </Row>
@@ -79,9 +95,9 @@ function OptionGroup({ title, note, children }: { title: string; note?: string; 
   );
 }
 
-function Toggle({ on }: { on: boolean }) {
+function Toggle({ on, onClick }: { on: boolean; onClick?: () => void }) {
   return (
-    <Row width={44} height={26} padding={3} cornerRadius={13} fill={on ? color.sage : color.oatStrong} justify={on ? "end" : "start"}>
+    <Row width={44} height={26} padding={3} cornerRadius={13} fill={on ? color.sage : color.oatStrong} justify={on ? "end" : "start"} onClick={onClick}>
       <Ellipse width={20} height={20} fill={color.white} shadow={{ y: 1, blur: 2, color: "rgba(0,0,0,0.2)" }} />
     </Row>
   );
@@ -100,9 +116,24 @@ function KeyValue({ label, value, tint = color.espresso, strong = false }: { lab
   );
 }
 
+const minus = (n: number) => `-${yuan(n)}`;
+
 // ------------------------------------------------------------------ home
 
-function HomeBody() {
+function HomeFeed({
+  category,
+  onCategory,
+  countOf,
+  onOpen,
+  onCount,
+}: {
+  category: string;
+  onCategory: (c: string) => void;
+  countOf: (p: Product) => number;
+  onOpen: (p: Product) => void;
+  onCount: (p: Product, count: number) => void;
+}) {
+  const shown = category === "推荐" ? products : products.filter((p) => p.categories.includes(category));
   return (
     <Column width="fill" height="fill" clip align="stretch">
       <StatusBar />
@@ -132,7 +163,7 @@ function HomeBody() {
         </Row>
 
         {/* Editorial banner: the photo's own backdrop colour carries the copy, so there is no seam and no decoration. */}
-        <Frame name="Promo" width="fill" height={156} cornerRadius={20} fill={PROMO_BG} clip>
+        <Frame name="Promo" width="fill" height={156} cornerRadius={20} fill={PROMO_BG} clip onClick={() => onOpen(byId.osmanthus)}>
           <Image src={images.latte} right={-28} y={0} width={234} height={156} />
           <Rect x={144} y={0} width={64} height="fill" fill={{ type: "linear", angle: 90, stops: [PROMO_BG, `${PROMO_BG}00`] }} />
           <Column x={20} y={20} width={170} gap={4}>
@@ -157,18 +188,17 @@ function HomeBody() {
         </Frame>
 
         <Row width="fill" gap={8} scroll="horizontal">
-          <Chip selected>推荐</Chip>
-          <Chip icon="coffee">拿铁</Chip>
-          <Chip>美式</Chip>
-          <Chip icon="snowflake">冷萃</Chip>
-          <Chip>手冲</Chip>
-          <Chip icon="croissant">烘焙</Chip>
+          {CATEGORIES.map(([label, icon]) => (
+            <Chip key={label} icon={icon} selected={label === category} onClick={() => onCategory(label)}>
+              {label}
+            </Chip>
+          ))}
         </Row>
 
-        <SectionHeader title="人气推荐" action="全部 24 款" />
+        <SectionHeader title={category === "推荐" ? "人气推荐" : category} action={category === "推荐" ? "全部 24 款" : `${shown.length} 款`} />
         <Grid columns={2} gap={12}>
-          {products.map((p, i) => (
-            <ProductCard key={p.id} product={p} count={i === 0 ? 1 : 0} />
+          {shown.map((p) => (
+            <ProductCard key={p.id} product={p} count={countOf(p)} onOpen={() => onOpen(p)} onCount={(n) => onCount(p, n)} />
           ))}
         </Grid>
       </Column>
@@ -176,21 +206,23 @@ function HomeBody() {
   );
 }
 
-function CartBar() {
+function CartBar({ lines }: { lines: CartLine[] }) {
+  const { count, subtotal, discount } = cartTotals(lines);
+  if (count === 0) return null;
   return (
     <Row name="CartBar" absolute x={16} right={16} bottom={102} height={60} padding={[0, 8, 0, 10]} gap={12} align="center" cornerRadius={30} fill={color.espresso} shadow={shadow.float}>
       <Row width={42} height={42} align="center" justify="center" cornerRadius={21} fill={color.caramel}>
         <Icon name="shoppingBag" size={20} tint={color.white} />
-        <Row absolute right={-4} y={-4} width={20} height={20} align="center" justify="center" cornerRadius={10} fill={color.tomato} stroke={color.espresso} strokeWidth={2} strokeAlign="outside">
-          <Text fontSize={11} fontWeight={700} color={color.white}>
-            3
+        <Row absolute right={-4} y={-4} height={20} padding={[0, 6]} align="center" justify="center" cornerRadius={10} fill={color.tomato} stroke={color.espresso} strokeWidth={2} strokeAlign="outside">
+          <Text fontSize={11} fontWeight={700} tabularNums color={color.white}>
+            {count}
           </Text>
         </Row>
       </Row>
       <Column width="fill" gap={1}>
-        <Price value={78} size={20} tint={color.white} />
+        <Price value={subtotal - discount} size={20} tint={color.white} />
         <Text fontSize={11} color={color.oatStrong}>
-          已减 ¥8 · 免打包费
+          {discount > 0 ? `已减 ${yuan(discount)} · 免打包费` : "到店自取 · 免打包费"}
         </Text>
       </Column>
       <Row height={44} padding={[0, 20]} align="center" cornerRadius={22} fill={color.caramelSoft}>
@@ -202,33 +234,17 @@ function CartBar() {
   );
 }
 
-export function Home() {
+/** Product options over a dimmed Home. Picks are click state: they reset each time the sheet opens. */
+function ProductSheet({ product: p, onClose, onAdd }: { product: Product; onClose: () => void; onAdd: (line: CartLine) => void }) {
+  const [picks, setPicks] = useState<Picks>(() => initialPicks(p));
+  const [qty, setQtyState] = useState(1);
+  const [liked, setLiked] = useState(false);
+  const pick = (title: string, value: string) => setPicks({ ...picks, [title]: value });
+  const unit = unitPrice(p, picks);
+  const was = p.was != null ? unitPrice(p, picks, p.was) : undefined;
   return (
-    <Phone>
-      <HomeBody />
-      <CartBar />
-      <TabBar active="首页" />
-    </Phone>
-  );
-}
-
-// ------------------------------------------------------------------ product sheet
-
-const TEMPS = [
-  ["热", "flame"],
-  ["冰", "snowflake"],
-  ["少冰", undefined],
-  ["去冰", undefined],
-] as const satisfies readonly (readonly [string, IconName | undefined])[];
-
-export function ProductSheet() {
-  const p = byId.osmanthus;
-  const [size, setSize] = useState("大杯 16oz");
-  const [temp, setTemp] = useVariant("温度", TEMPS.map(([t]) => t));
-  return (
-    <Phone>
-      <HomeBody />
-      <Rect name="Scrim" width="fill" height="fill" fill={color.scrim} />
+    <>
+      <Rect name="Scrim" width="fill" height="fill" fill={color.scrim} onClick={onClose} />
       <Column name="Sheet" absolute x={0} bottom={0} width="fill" padding={[10, 20, 0, 20]} gap={16} cornerRadius={[28, 28, 0, 0]} fill={color.foam} shadow={shadow.sheet} align="stretch">
         <Row width="fill" justify="center">
           <Rect width={36} height={5} cornerRadius={3} fill={color.oatStrong} />
@@ -236,13 +252,15 @@ export function ProductSheet() {
         <Frame width="fill" height={150} cornerRadius={20} clip>
           <Image src={p.image} width="fill" height="fill" />
           <Row right={12} y={12}>
-            <RoundButton icon="x" light />
+            <RoundButton icon="x" light onClick={onClose} />
           </Row>
           <Row x={12} bottom={12} gap={6}>
-            <Badge tone="brand">{p.tag}</Badge>
-            <Badge tone="success" dot>
-              热销 · 今日 128 杯
-            </Badge>
+            {p.tag && <Badge tone="brand">{p.tag}</Badge>}
+            {p.sold != null && (
+              <Badge tone="success" dot>
+                {`热销 · 今日 ${p.sold} 杯`}
+              </Badge>
+            )}
           </Row>
         </Frame>
         <Column gap={4} align="stretch">
@@ -250,133 +268,232 @@ export function ProductSheet() {
             <Text fontSize={22} fontWeight={700} color={color.espresso}>
               {p.name}
             </Text>
-            <Icon name="heart" size={22} tint={color.tomato} />
+            <Row onClick={() => setLiked(!liked)}>
+              <Path width={22} height={22} viewBox="0 0 24 24" d={ICONS.heart} fill={liked ? color.tomato : undefined} stroke={color.tomato} strokeWidth={1.8} strokeJoin="round" />
+            </Row>
           </Row>
           <Text fontFamily={font.display} italic fontSize={15} color={color.caramelText}>
             {p.en}
           </Text>
           <Text width="fill" maxLines={2} fontSize={13} lineHeight={19} color={color.muted}>
-            自熬金桂糖浆搭配燕麦奶与双份浓缩，入口是桂花的清甜，尾韵带一点烘焙坚果香。
+            {p.story ?? p.desc}
           </Text>
         </Column>
-        <OptionGroup title="杯型">
-          <Segmented options={["中杯 12oz", "大杯 16oz", "超大杯 20oz"]} value={size} onChange={setSize} />
-        </OptionGroup>
-        <OptionGroup title="温度">
-          <Row gap={8}>
-            {TEMPS.map(([t, icon]) => (
-              <Chip key={t} icon={icon} selected={t === temp} onClick={() => setTemp(t)}>
-                {t}
-              </Chip>
-            ))}
-          </Row>
-        </OptionGroup>
-        <OptionGroup title="奶基" note="燕麦奶 +¥3 已含">
-          <Row gap={8}>
-            <Chip icon="leaf" selected>
-              燕麦奶
-            </Chip>
-            <Chip icon="milk">全脂奶</Chip>
-            <Chip>生椰乳</Chip>
-          </Row>
-        </OptionGroup>
-        <OptionGroup title="甜度">
-          <Row gap={8}>
-            <Chip>标准</Chip>
-            <Chip selected>少甜</Chip>
-            <Chip>不另外加糖</Chip>
-          </Row>
-        </OptionGroup>
+        {p.options.map((o) => (
+          <OptionGroup key={o.title} title={o.title} note={o.note}>
+            {o.segmented ? (
+              <Segmented options={o.choices.map((c) => c.label)} value={picks[o.title]} onChange={(v) => pick(o.title, v)} />
+            ) : (
+              <Row width="fill" gap={8} wrap>
+                {o.choices.map((c) => (
+                  <Chip key={c.label} icon={c.icon} selected={picks[o.title] === c.label} onClick={() => pick(o.title, c.label)}>
+                    {c.delta ? `${c.label} +¥${c.delta}` : c.label}
+                  </Chip>
+                ))}
+              </Row>
+            )}
+          </OptionGroup>
+        ))}
         <Column gap={0} align="stretch" stroke={color.oat} strokeWidth={[1, 0, 0, 0]} strokeAlign="inside" padding={[14, 0, 0, 0]}>
           <Row gap={16} align="center">
             <Column width="fill" gap={2}>
-              <Price value={p.price} was={p.was} size={26} />
-              <Text fontSize={11} color={color.muted}>
-                {`${size.split(" ")[0]} · ${temp} · 燕麦奶 · 少甜`}
+              <Price value={unit * qty} was={was != null ? was * qty : undefined} size={26} />
+              <Text width="fill" maxLines={1} fontSize={11} color={color.muted}>
+                {summarize(p, picks)}
               </Text>
             </Column>
-            <Stepper value={1} />
+            <Stepper value={qty} min={1} onChange={setQtyState} />
           </Row>
           <Row padding={[14, 0, 0, 0]}>
-            <Button size="lg" width="fill" icon="shoppingBag">
+            <Button size="lg" width="fill" icon="shoppingBag" onClick={() => onAdd(lineFor(p, picks, qty))}>
               加入购物车
             </Button>
           </Row>
           <HomeIndicator />
         </Column>
       </Column>
+    </>
+  );
+}
+
+/**
+ * Browse and order. Variants: whether the cart starts with the sample order, and whether the
+ * product sheet is open. In Play mode, cards open the sheet, + and the steppers change the cart,
+ * and chips filter the grid.
+ */
+export function Home() {
+  const [cartMode] = useVariant("购物车", ["有商品", "空"]);
+  const [overlay, setOverlay] = useVariant("弹层", ["无", "商品详情"]);
+  // Click edits are kept per cart variant, so switching the variant shows that variant's own cart.
+  const [carts, setCarts] = useState<Record<string, CartLine[]>>({});
+  const lines = carts[cartMode] ?? (cartMode === "空" ? [] : SAMPLE_CART);
+  const setLines = (next: CartLine[]) => setCarts({ ...carts, [cartMode]: next });
+  const [category, setCategory] = useState("推荐");
+  // `opened` remounts the sheet each time it opens, so its picks start fresh.
+  const [sheet, setSheet] = useState({ id: "osmanthus", opened: 0 });
+
+  const countOf = (p: Product) => lines.filter((l) => l.product.id === p.id).reduce((n, l) => n + l.qty, 0);
+  const onCount = (p: Product, next: number) => {
+    if (next > countOf(p)) return setLines(addLine(lines, lineFor(p)));
+    const last = lines.findLast((l) => l.product.id === p.id);
+    if (last) setLines(setQty(lines, last, last.qty - 1));
+  };
+  const open = (p: Product) => {
+    setSheet({ id: p.id, opened: sheet.opened + 1 });
+    setOverlay("商品详情");
+  };
+
+  return (
+    <Phone>
+      <HomeFeed category={category} onCategory={setCategory} countOf={countOf} onOpen={open} onCount={onCount} />
+      <CartBar lines={lines} />
+      <TabBar active="首页" />
+      {overlay === "商品详情" && (
+        <ProductSheet
+          key={`${sheet.id}-${sheet.opened}`}
+          product={byId[sheet.id]}
+          onClose={() => setOverlay("无")}
+          onAdd={(line) => {
+            setLines(addLine(lines, line));
+            setOverlay("无");
+          }}
+        />
+      )}
     </Phone>
   );
 }
 
 // ------------------------------------------------------------------ checkout
 
-const CART = [
-  { product: byId.osmanthus, options: "大杯 · 热 · 燕麦奶 · 少甜", qty: 2 },
-  { product: byId.iced, options: "大杯 · 少冰 · 标准甜", qty: 1 },
-  { product: byId.croissant, options: "加热", qty: 1 },
-];
+function StoreCard() {
+  return (
+    <Card>
+      <Row gap={12} align="center">
+        <Row width={44} height={44} align="center" justify="center" cornerRadius={radius.md} fill={color.caramelSoft}>
+          <Icon name="store" size={22} tint={color.roast} />
+        </Row>
+        <Column width="fill" gap={3}>
+          <Text fontSize={15} fontWeight={700} color={color.espresso}>
+            焙刻 · 武康路店
+          </Text>
+          <Text width="fill" maxLines={1} fontSize={12} color={color.muted}>
+            徐汇区武康路 378 号 · 距你 320m · 步行 4 分钟
+          </Text>
+        </Column>
+        <Badge tone="success" dot>
+          营业中
+        </Badge>
+      </Row>
+      <Divider />
+      <Row gap={8} align="center">
+        <Icon name="clock" size={16} tint={color.caramelText} />
+        <Text width="fill" fontSize={13} color={color.espresso}>
+          预计 <Span fontWeight={700}>14:35</Span> 可取 · 前方 3 单
+        </Text>
+        <Text fontSize={13} fontWeight={600} color={color.roast}>
+          修改时间
+        </Text>
+      </Row>
+    </Card>
+  );
+}
 
+function AddressCard() {
+  return (
+    <Card>
+      <Row gap={12} align="center">
+        <Row width={44} height={44} align="center" justify="center" cornerRadius={radius.md} fill={color.skySoft}>
+          <Icon name="mapPin" size={22} tint={color.sky} />
+        </Row>
+        <Column width="fill" gap={3}>
+          <Text width="fill" maxLines={1} fontSize={15} fontWeight={700} color={color.espresso}>
+            湖南路 262 弄 5 号 302
+          </Text>
+          <Text fontSize={12} color={color.muted}>
+            林小满 · 138 **** 8000
+          </Text>
+        </Column>
+        <Icon name="chevronRight" size={16} tint={color.muted} />
+      </Row>
+      <Divider />
+      <Row gap={8} align="center">
+        <Icon name="bike" size={16} tint={color.sky} />
+        <Text width="fill" fontSize={13} color={color.espresso}>
+          预计 <Span fontWeight={700}>14:58</Span> 送达 · 距门店 1.2km
+        </Text>
+        <Text fontSize={13} fontWeight={600} color={color.roast}>
+          修改时间
+        </Text>
+      </Row>
+    </Card>
+  );
+}
+
+const DELIVERY_FEE = 6;
+const PACKING_FEE = 2;
+const POINTS_OFF = 2.4;
+
+/**
+ * Review and pay. Variant: pickup or delivery. In Play mode the steppers, 清空 and the points
+ * switch recompute every total.
+ */
 export function Checkout() {
+  const [mode, setMode] = useVariant("配送方式", ["到店自取", "外送"]);
+  const [lines, setLines] = useState(SAMPLE_CART);
+  const [usePoints, setUsePoints] = useState(true);
+  const delivery = mode === "外送";
+  const { count, subtotal, discount } = cartTotals(lines);
+  const empty = count === 0;
+  const points = usePoints && !empty ? POINTS_OFF : 0;
+  const fees = delivery && !empty ? DELIVERY_FEE + PACKING_FEE : 0;
+  const total = Math.max(0, subtotal - discount - points + fees);
+  const saved = discount + points;
+
   return (
     <Phone>
       <Column width="fill" height="fill" align="stretch">
         <StatusBar />
         <NavBar title="确认订单" />
-        <Column width="fill" height="fill" padding={[8, 16, 140, 16]} gap={12} clip align="stretch">
-          <Segmented options={["到店自取", "外送"]} value="到店自取" />
-          <Card>
-            <Row gap={12} align="center">
-              <Row width={44} height={44} align="center" justify="center" cornerRadius={radius.md} fill={color.caramelSoft}>
-                <Icon name="store" size={22} tint={color.roast} />
-              </Row>
-              <Column width="fill" gap={3}>
-                <Text fontSize={15} fontWeight={700} color={color.espresso}>
-                  焙刻 · 武康路店
-                </Text>
-                <Text width="fill" maxLines={1} fontSize={12} color={color.muted}>
-                  徐汇区武康路 378 号 · 距你 320m · 步行 4 分钟
-                </Text>
-              </Column>
-              <Badge tone="success" dot>
-                营业中
-              </Badge>
-            </Row>
-            <Divider />
-            <Row gap={8} align="center">
-              <Icon name="clock" size={16} tint={color.caramelText} />
-              <Text width="fill" fontSize={13} color={color.espresso}>
-                预计 <Span fontWeight={700}>14:35</Span> 可取 · 前方 3 单
-              </Text>
-              <Text fontSize={13} fontWeight={600} color={color.roast}>
-                修改时间
-              </Text>
-            </Row>
-          </Card>
+        <Column width="fill" height="fill" padding={[8, 16, 140, 16]} gap={12} scroll="vertical" align="stretch">
+          <Segmented options={["到店自取", "外送"]} value={mode} onChange={(v) => setMode(v === "外送" ? "外送" : "到店自取")} />
+          {delivery ? <AddressCard /> : <StoreCard />}
 
           <Card gap={14}>
             <Row justify="space-between" align="center">
               <Text fontSize={15} fontWeight={700} color={color.espresso}>
-                已选 4 件
+                {`已选 ${count} 件`}
               </Text>
-              <Text fontSize={13} color={color.muted}>
-                清空
-              </Text>
+              {!empty && (
+                <Text fontSize={13} color={color.muted} onClick={() => setLines([])}>
+                  清空
+                </Text>
+              )}
             </Row>
-            {CART.map(({ product, options, qty }, i) => [
+            {empty && (
+              <Column width="fill" padding={[20, 0]} gap={6} align="center">
+                <Icon name="shoppingBag" size={28} tint={color.oatStrong} />
+                <Text fontSize={14} fontWeight={600} color={color.espresso}>
+                  购物车是空的
+                </Text>
+                <Text fontSize={12} color={color.muted}>
+                  回首页挑一杯吧
+                </Text>
+              </Column>
+            )}
+            {lines.map((line, i) => [
               i > 0 && <Divider key={`d${i}`} inset={68} />,
-              <Row key={product.id} gap={12} align="center">
-                <Image src={product.image} width={56} height={56} cornerRadius={12} />
+              <Row key={`${line.product.id}/${line.options}`} gap={12} align="center">
+                <Image src={line.product.image} width={56} height={56} cornerRadius={12} />
                 <Column width="fill" gap={3}>
                   <Text width="fill" maxLines={1} fontSize={14} fontWeight={600} color={color.espresso}>
-                    {product.name}
+                    {line.product.name}
                   </Text>
                   <Text width="fill" maxLines={1} fontSize={12} color={color.muted}>
-                    {options}
+                    {line.options}
                   </Text>
-                  <Price value={product.price} size={15} />
+                  <Price value={line.unit} size={15} />
                 </Column>
-                <Stepper value={qty} compact />
+                <Stepper value={line.qty} compact onChange={(n) => setLines(setQty(lines, line, n))} />
               </Row>,
             ])}
           </Card>
@@ -385,20 +502,26 @@ export function Checkout() {
             <Row gap={10} align="center">
               <Icon name="ticket" size={18} tint={color.tomato} />
               <Text width="fill" fontSize={14} color={color.espresso}>
-                优惠券 <Span fontSize={12} color={color.muted}>秋季第二杯半价</Span>
+                优惠券 <Span fontSize={12} color={color.muted}>{PROMO}</Span>
               </Text>
-              <Text fontSize={14} fontWeight={700} tabularNums color={color.tomato}>
-                -¥8.00
-              </Text>
+              {discount > 0 ? (
+                <Text fontSize={14} fontWeight={700} tabularNums color={color.tomato}>
+                  {minus(discount)}
+                </Text>
+              ) : (
+                <Text fontSize={13} color={color.subtle}>
+                  未满足条件
+                </Text>
+              )}
               <Icon name="chevronRight" size={14} tint={color.muted} />
             </Row>
             <Divider inset={28} />
             <Row gap={10} align="center">
               <Icon name="gift" size={18} tint={color.caramelText} />
               <Text width="fill" fontSize={14} color={color.espresso}>
-                积分抵扣 <Span fontSize={12} color={color.muted}>240 积分抵 ¥2.40</Span>
+                积分抵扣 <Span fontSize={12} color={color.muted}>{`240 积分抵 ${yuan(POINTS_OFF)}`}</Span>
               </Text>
-              <Toggle on />
+              <Toggle on={usePoints} onClick={() => setUsePoints(!usePoints)} />
             </Row>
             <Divider inset={28} />
             <Row gap={10} align="center">
@@ -414,10 +537,17 @@ export function Checkout() {
           </Card>
 
           <Card gap={10}>
-            <KeyValue label="商品金额" value={yuan(114)} />
-            <KeyValue label="优惠券" value="-¥8.00" tint={color.tomato} />
-            <KeyValue label="积分抵扣" value="-¥2.40" tint={color.tomato} />
-            <KeyValue label="打包费" value={yuan(0)} />
+            <KeyValue label="商品金额" value={yuan(subtotal)} />
+            <KeyValue label="优惠券" value={minus(discount)} tint={color.tomato} />
+            <KeyValue label="积分抵扣" value={minus(points)} tint={color.tomato} />
+            {delivery ? (
+              <>
+                <KeyValue label="配送费" value={yuan(empty ? 0 : DELIVERY_FEE)} />
+                <KeyValue label="打包费" value={yuan(empty ? 0 : PACKING_FEE)} />
+              </>
+            ) : (
+              <KeyValue label="打包费" value={yuan(0)} />
+            )}
           </Card>
         </Column>
       </Column>
@@ -429,13 +559,15 @@ export function Checkout() {
               <Text fontSize={13} color={color.muted}>
                 合计
               </Text>
-              <Price value={103.6} size={24} />
+              <Price value={total} size={24} />
             </Row>
-            <Text fontSize={12} fontWeight={600} color={color.caramelText}>
-              已为你节省 ¥10.40
-            </Text>
+            {saved > 0 && (
+              <Text fontSize={12} fontWeight={600} color={color.caramelText}>
+                {`已为你节省 ${yuan(saved)}`}
+              </Text>
+            )}
           </Column>
-          <Button size="lg" width={150}>
+          <Button size="lg" width={150} disabled={empty}>
             立即支付
           </Button>
         </Row>
@@ -451,8 +583,9 @@ const STEPS = ["已下单", "制作中", "待取餐", "已完成"];
 /** Where the progress line stops for each step: just past that step's circle. */
 const STEP_PROGRESS = [0.04, 0.38, 0.71, 1];
 const STEP_ICONS: IconName[] = ["receipt", "coffee", "shoppingBag", "check"];
+type Step = 0 | 1 | 2 | 3;
 
-function Steps({ current }: { current: number }) {
+function Steps({ current, onPick }: { current: number; onPick?: (step: Step) => void }) {
   return (
     <Frame name="Steps" width="fill" height={54}>
       <Row x={30} right={30} y={13} height={3}>
@@ -460,9 +593,9 @@ function Steps({ current }: { current: number }) {
       </Row>
       <Row width="fill" justify="space-between">
         {STEPS.map((label, i) => {
-          const state = i < current ? "done" : i === current ? "active" : "todo";
+          const state = i < current || current === STEPS.length - 1 ? "done" : i === current ? "active" : "todo";
           return (
-            <Column key={label} width={60} gap={8} align="center">
+            <Column key={label} width={60} gap={8} align="center" onClick={onPick && (() => onPick(i as Step))}>
               {state === "done" && (
                 <Row width={28} height={28} align="center" justify="center" cornerRadius={14} fill={color.sage}>
                   <Icon name="check" size={16} tint={color.white} weight={2.6} />
@@ -517,8 +650,40 @@ function MapView() {
   );
 }
 
+/** What the sheet says at each step: status badge, the line under it, and the barista card. */
+const STAGES: { tone: Tone; status: string; when: [string, string, string]; title: string; detail: string }[] = [
+  { tone: "info", status: "已接单", when: ["前方 ", "3", " 单"], title: "吧台已收到你的订单", detail: "Jason 做完前面 3 单就开始做你的" },
+  { tone: "warning", status: "制作中", when: ["预计 ", "14:35", " 可取"], title: "咖啡师 Jason 正在为你制作", detail: "第 2 / 4 杯 · 桂花燕麦拿铁 · 大杯热" },
+  { tone: "success", status: "请取餐", when: ["已在 ", "2 号吧台", " 等你"], title: "4 件都备好了", detail: "到店出示取餐码，或报手机尾号 8000" },
+  { tone: "neutral", status: "已完成", when: ["", "14:37", " 已取餐"], title: "", detail: "" },
+];
+
+function Rating({ value, onRate }: { value: number; onRate: (n: number) => void }) {
+  return (
+    <Column padding={16} gap={12} align="center" cornerRadius={radius.lg} fill={color.white} shadow={shadow.card}>
+      <Text fontSize={15} fontWeight={700} color={color.espresso}>
+        {value ? "谢谢你的评价" : "这一单还满意吗？"}
+      </Text>
+      <Row gap={10}>
+        {[1, 2, 3, 4, 5].map((n) => (
+          <Row key={n} padding={2} onClick={() => onRate(n)}>
+            <Path width={30} height={30} viewBox="0 0 24 24" d={ICONS.star} fill={n <= value ? color.caramel : undefined} stroke={n <= value ? color.caramel : color.oatStrong} strokeWidth={1.6} strokeJoin="round" />
+          </Row>
+        ))}
+      </Row>
+      <Text fontSize={12} color={color.muted}>
+        {value ? `${value} 星 · 已同步给武康路店` : "评价后送 20 积分"}
+      </Text>
+    </Column>
+  );
+}
+
+/** Order status over a map. Variant: the step; tap a step in Play mode to move to it. */
 export function OrderTracking() {
-  const [step] = useVariant("步骤", [0, 1, 2, 3], 1);
+  const [step, setStep] = useVariant("步骤", [0, 1, 2, 3], 1);
+  const [rating, setRating] = useState(0);
+  const stage = STAGES[step];
+  const done = step === 3;
   return (
     <Phone>
       <MapView />
@@ -538,38 +703,52 @@ export function OrderTracking() {
             <Text fontSize={12} color={color.muted}>
               取餐码
             </Text>
-            <Text fontFamily={font.mono} fontSize={40} fontWeight={700} letterSpacing={1} color={color.espresso}>
+            <Text fontFamily={font.mono} fontSize={40} fontWeight={700} letterSpacing={1} color={step === 2 ? color.sage : done ? color.subtle : color.espresso}>
               A-2048
             </Text>
           </Column>
           <Column gap={6} align="end" padding={[0, 0, 6, 0]}>
-            <Badge tone="warning" dot>
-              制作中
+            <Badge tone={stage.tone} dot>
+              {stage.status}
             </Badge>
             <Text fontSize={13} color={color.espresso}>
-              预计 <Span fontWeight={700} tabularNums>14:35</Span> 可取
+              {stage.when[0]}
+              <Span fontWeight={700} tabularNums>
+                {stage.when[1]}
+              </Span>
+              {stage.when[2]}
             </Text>
           </Column>
         </Row>
-        <Steps current={step} />
-        <Row padding={12} gap={12} align="center" cornerRadius={radius.lg} fill={color.white} shadow={shadow.card}>
-          <Avatar initials="JC" size={40} />
-          <Column width="fill" gap={2}>
-            <Text fontSize={14} fontWeight={600} color={color.espresso}>
-              咖啡师 Jason 正在为你制作
-            </Text>
-            <Text width="fill" maxLines={1} fontSize={12} color={color.muted}>
-              第 2 / 4 杯 · 桂花燕麦拿铁 · 大杯热
-            </Text>
-          </Column>
-          <Row width={36} height={36} align="center" justify="center" cornerRadius={18} fill={color.crema}>
-            <Icon name="messageCircle" size={18} tint={color.roast} />
+        <Steps current={step} onPick={setStep} />
+        {done ? (
+          <Rating value={rating} onRate={setRating} />
+        ) : (
+          <Row padding={12} gap={12} align="center" cornerRadius={radius.lg} fill={color.white} shadow={shadow.card}>
+            <Avatar initials="JC" size={40} />
+            <Column width="fill" gap={2}>
+              <Text fontSize={14} fontWeight={600} color={color.espresso}>
+                {stage.title}
+              </Text>
+              <Text width="fill" maxLines={1} fontSize={12} color={color.muted}>
+                {stage.detail}
+              </Text>
+            </Column>
+            <Row width={36} height={36} align="center" justify="center" cornerRadius={18} fill={color.crema}>
+              <Icon name="messageCircle" size={18} tint={color.roast} />
+            </Row>
           </Row>
-        </Row>
+        )}
         <Row gap={12}>
-          <Button variant="outline" icon="phone" width="fill">
-            联系门店
-          </Button>
+          {done ? (
+            <Button variant="outline" icon="refreshCw" width="fill">
+              再来一单
+            </Button>
+          ) : (
+            <Button variant="outline" icon="phone" width="fill">
+              联系门店
+            </Button>
+          )}
           <Button variant="secondary" icon="receipt" width="fill">
             查看小票
           </Button>
@@ -584,25 +763,71 @@ export function OrderTracking() {
 
 // ------------------------------------------------------------------ membership
 
-const PERKS: [IconName, string][] = [
-  ["gift", "生日饮品"],
-  ["cupSoda", "免费升杯"],
-  ["sparkles", "新品尝鲜"],
-  ["star", "积分翻倍"],
-];
+type Tier = "金卡" | "黑卡";
+
+/** Each tier is the same near-black card with its own metal: brass for gold, pale platinum for black. */
+const TIERS: Record<Tier, { mark: string; bg: string; edge: string; metal: string; muted: string; points: string; progress: number; goal: ReactNode; goalNote: string; perks: [IconName, string][]; perkCount: number }> = {
+  金卡: {
+    mark: "GOLD",
+    bg: "#1e1510",
+    edge: "rgba(255, 236, 214, 0.08)",
+    metal: "#c9a46a",
+    muted: "#ab9888",
+    points: "2,480",
+    progress: 0.78,
+    goal: (
+      <>
+        再消费 <Span fontWeight={700} color={color.espresso}>¥120</Span> 升级黑卡
+      </>
+    ),
+    goalNote: "9 折 · 每月 2 张免费券",
+    perks: [
+      ["gift", "生日饮品"],
+      ["cupSoda", "免费升杯"],
+      ["sparkles", "新品尝鲜"],
+      ["star", "积分翻倍"],
+    ],
+    perkCount: 8,
+  },
+  黑卡: {
+    mark: "BLACK",
+    bg: "#0e0d0c",
+    edge: "rgba(255, 255, 255, 0.10)",
+    metal: "#d9d4ca",
+    muted: "#a39d95",
+    points: "6,920",
+    progress: 0.86,
+    goal: (
+      <>
+        再消费 <Span fontWeight={700} color={color.espresso}>¥580</Span> 保级至 2027 年
+      </>
+    ),
+    goalNote: "保级周期 12 个月",
+    perks: [
+      ["ticket", "每月 2 杯"],
+      ["cupSoda", "免费升杯"],
+      ["sparkles", "新品优先"],
+      ["messageCircle", "专属客服"],
+    ],
+    perkCount: 12,
+  },
+};
 
 const HISTORY = [
-  { p: byId.osmanthus, when: "11-15 14:21", status: "制作中", tone: "warning" as const, total: 103.6 },
+  { p: byId.osmanthus, when: "11-15 14:21", status: "制作中", tone: "warning" as const, total: 91.6 },
   { p: byId.americano, when: "11-13 08:42", status: "已完成", tone: "success" as const, total: 22 },
   { p: byId.beans, when: "11-09 19:05", status: "已退款", tone: "neutral" as const, total: 98 },
 ];
 
+/** Profile and member card. Variant: membership tier. */
 export function Membership() {
+  const [tier] = useVariant("等级", ["金卡", "黑卡"] as Tier[]);
+  const t = TIERS[tier];
   return (
     <Phone>
       <Column width="fill" height="fill" clip align="stretch">
         <StatusBar />
-        <Column padding={[6, 20, 120, 20]} gap={18} align="stretch">
+        <Column height="fill" scroll="vertical" padding={[6, 20, 120, 20]} gap={18} align="stretch">
           <Row align="center" justify="space-between">
             <Text fontFamily={font.display} fontSize={30} fontWeight={600} color={color.espresso}>
               我的
@@ -614,51 +839,51 @@ export function Membership() {
           </Row>
 
           {/* A physical-card feel from type and one metal colour, not from glow. */}
-          <Column name="MemberCard" width="fill" height={204} padding={22} cornerRadius={20} fill={CARD.bg} stroke={CARD.edge} strokeAlign="inside" shadow={shadow.card} justify="space-between" align="stretch">
+          <Column name="MemberCard" width="fill" height={204} padding={22} cornerRadius={20} fill={t.bg} stroke={t.edge} strokeAlign="inside" shadow={shadow.card} justify="space-between" align="stretch">
             <Row align="center" justify="space-between">
-              <Text fontFamily={font.display} fontSize={18} fontWeight={600} color={CARD.text}>
+              <Text fontFamily={font.display} fontSize={18} fontWeight={600} color={color.crema}>
                 焙刻 <Span italic fontWeight={400}>Roastery</Span>
               </Text>
-              <Text fontSize={11} fontWeight={700} letterSpacing={2.5} color={CARD.brass}>
-                GOLD
+              <Text fontSize={11} fontWeight={700} letterSpacing={2.5} color={t.metal}>
+                {t.mark}
               </Text>
             </Row>
             <Column gap={2}>
-              <Text fontSize={11} letterSpacing={1} color={CARD.muted}>
+              <Text fontSize={11} letterSpacing={1} color={t.muted}>
                 可用积分
               </Text>
-              <Text fontFamily={font.display} fontSize={40} lineHeight={44} fontWeight={500} tabularNums color={CARD.text}>
-                2,480
+              <Text fontFamily={font.display} fontSize={40} lineHeight={44} fontWeight={500} tabularNums color={color.crema}>
+                {t.points}
               </Text>
             </Column>
             <Row align="end" justify="space-between">
               <Column gap={3}>
-                <Text fontSize={14} fontWeight={600} color={CARD.text}>
+                <Text fontSize={14} fontWeight={600} color={color.crema}>
                   林小满
                 </Text>
-                <Text fontFamily={font.mono} fontSize={11} letterSpacing={1.5} color={CARD.muted}>
+                <Text fontFamily={font.mono} fontSize={11} letterSpacing={1.5} color={t.muted}>
                   6228 0412 2048
                 </Text>
               </Column>
-              <Icon name="qrCode" size={26} tint={CARD.brass} />
+              <Icon name="qrCode" size={26} tint={t.metal} />
             </Row>
           </Column>
 
           <Column gap={8} align="stretch">
             <Row justify="space-between" align="center">
               <Text fontSize={13} color={color.muted}>
-                再消费 <Span fontWeight={700} color={color.espresso}>¥120</Span> 升级黑卡
+                {t.goal}
               </Text>
               <Text fontSize={12} color={color.subtle}>
-                9 折 · 每月 2 张免费券
+                {t.goalNote}
               </Text>
             </Row>
-            <ProgressBar value={0.78} height={4} tint={color.roast} track={color.oat} />
+            <ProgressBar value={t.progress} height={4} tint={color.roast} track={color.oat} />
           </Column>
 
           <Row width="fill" padding={[16, 0]} fill={color.white} cornerRadius={radius.lg} shadow={shadow.card}>
             {[
-              ["优惠券", "5", "张"],
+              ["优惠券", tier === "黑卡" ? "9" : "5", "张"],
               ["余额", "128.00", "元"],
               ["本月杯数", "14", "杯"],
             ].map(([k, v, unit], i) => (
@@ -676,9 +901,9 @@ export function Membership() {
             ))}
           </Row>
 
-          <SectionHeader title="会员权益" action="全部 8 项" />
+          <SectionHeader title="会员权益" action={`全部 ${t.perkCount} 项`} />
           <Grid columns={4} gap={10}>
-            {PERKS.map(([icon, label]) => (
+            {t.perks.map(([icon, label]) => (
               <Column key={label} padding={[14, 0]} gap={8} align="center" cornerRadius={radius.lg} fill={color.white} shadow={shadow.card}>
                 <Row width={40} height={40} align="center" justify="center" cornerRadius={20} fill={color.caramelSoft}>
                   <Icon name={icon} size={20} tint={color.roast} />

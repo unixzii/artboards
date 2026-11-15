@@ -1,9 +1,9 @@
-// Store manager console (web, 1440 x 900): today's numbers, stock and states.
-import { Column, Ellipse, Frame, Grid, Image, Path, Rect, Row, Span, Text } from "artboards";
+// Store manager console (web, 1440 x 900): the day, week or month at a glance, with its empty, error and loading states.
+import { Column, Ellipse, Frame, Grid, Image, Path, Rect, Row, Span, Text, useVariant } from "artboards";
 import type { Track } from "artboards";
 import type { ReactNode } from "react";
 import { Avatar, Badge, Button, Icon, Input, ProgressBar, Segmented, Sparkline, plot, smoothPath, type Tone } from "./components.tsx";
-import { byId, products } from "./data.ts";
+import { byId } from "./data.ts";
 import type { IconName } from "./icons.ts";
 import { color, font, radius, shadow } from "./tokens.ts";
 
@@ -95,9 +95,161 @@ function Sidebar() {
   );
 }
 
+// ------------------------------------------------------------------ data per range
+
+type Range = "今日" | "本周" | "本月";
+type Status = "正常" | "空" | "错误" | "加载";
+
+interface KpiData {
+  icon: IconName;
+  label: string;
+  value: string;
+  unit?: string;
+  delta: number;
+  spark: number[];
+  tint: string;
+}
+
+interface Series {
+  title: string;
+  legend: [current: string, previous: string];
+  /** Slots on the x axis; `current` may stop early (the period is still running). */
+  slots: number;
+  current: number[];
+  previous: number[];
+  /** [slot index, label] along the x axis. */
+  labels: [number, string][];
+  max: number;
+  tip: { at: number; title: string; value: string; delta: string; note: string };
+}
+
+interface RangeData {
+  period: string;
+  compare: string;
+  kpis: KpiData[];
+  series: Series;
+  cups: number;
+  shares: number[];
+  top: number[];
+}
+
+const HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+
+const RANGES: Record<Range, RangeData> = {
+  今日: {
+    period: "2026 年 11 月 15 日 周日",
+    compare: "较上周同日",
+    kpis: [
+      { icon: "wallet", label: "营业额", value: "¥18,240", delta: 12.4, spark: [8, 12, 10, 14, 13, 17, 18], tint: color.caramel },
+      { icon: "receipt", label: "订单数", value: "412", unit: "单", delta: 8.1, spark: [30, 34, 31, 36, 40, 38, 41], tint: color.roast },
+      { icon: "users", label: "客单价", value: "¥44.3", delta: -2.6, spark: [47, 46, 46, 45, 44, 45, 44], tint: color.sky },
+      { icon: "refreshCw", label: "会员复购率", value: "38", unit: "%", delta: 4.2, spark: [30, 31, 33, 32, 35, 36, 38], tint: color.sage },
+    ],
+    series: {
+      title: "分时段出杯",
+      legend: ["今日", "上周同日"],
+      slots: HOURS.length,
+      current: [12, 46, 58, 34, 28, 41, 52, 61],
+      previous: [10, 38, 50, 36, 25, 36, 44, 47, 40, 33, 28, 26, 20, 12, 9],
+      labels: HOURS.map((h, i) => [i, `${h}:00`] as [number, string]).filter((_, i) => i % 2 === 0),
+      max: 75,
+      tip: { at: 7, title: "14:00 – 15:00", value: "61 杯", delta: "+29.8%", note: "上周同时段 47 杯" },
+    },
+    cups: 412,
+    shares: [0.46, 0.22, 0.12, 0.14, 0.06],
+    top: [128, 96, 74, 31],
+  },
+  本周: {
+    period: "11 月 9 日 – 15 日 · 第 46 周",
+    compare: "较上周",
+    kpis: [
+      { icon: "wallet", label: "营业额", value: "¥121,860", delta: 6.8, spark: [15, 16, 17, 17, 20, 22, 18], tint: color.caramel },
+      { icon: "receipt", label: "订单数", value: "2,958", unit: "单", delta: 5.2, spark: [362, 388, 401, 415, 468, 512, 412], tint: color.roast },
+      { icon: "users", label: "客单价", value: "¥41.2", delta: 1.5, spark: [40, 41, 40, 41, 42, 42, 41], tint: color.sky },
+      { icon: "refreshCw", label: "会员复购率", value: "41", unit: "%", delta: 2, spark: [38, 39, 39, 40, 40, 41, 41], tint: color.sage },
+    ],
+    series: {
+      title: "每日出杯",
+      legend: ["本周", "上周"],
+      slots: 7,
+      current: [362, 388, 401, 415, 468, 512, 412],
+      previous: [340, 371, 392, 380, 441, 497, 486],
+      labels: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"].map((d, i) => [i, d] as [number, string]),
+      max: 600,
+      tip: { at: 5, title: "11 月 14 日 周六", value: "512 杯", delta: "+3.0%", note: "上周六 497 杯" },
+    },
+    cups: 2958,
+    shares: [0.44, 0.24, 0.11, 0.15, 0.06],
+    top: [842, 655, 512, 203],
+  },
+  本月: {
+    period: "2026 年 11 月 1 日 – 15 日",
+    compare: "较上月同期",
+    kpis: [
+      { icon: "wallet", label: "营业额", value: "¥246,300", delta: 9.1, spark: [14, 15, 16, 16, 17, 19, 20], tint: color.caramel },
+      { icon: "receipt", label: "订单数", value: "5,870", unit: "单", delta: 7.4, spark: [380, 395, 410, 402, 430, 455, 470], tint: color.roast },
+      { icon: "users", label: "客单价", value: "¥42.0", delta: -1.2, spark: [43, 43, 42, 42, 42, 41, 42], tint: color.sky },
+      { icon: "refreshCw", label: "会员复购率", value: "40", unit: "%", delta: 3.1, spark: [35, 36, 37, 38, 38, 39, 40], tint: color.sage },
+    ],
+    series: {
+      title: "每日出杯",
+      legend: ["本月", "上月"],
+      slots: 30,
+      current: [372, 398, 365, 410, 455, 498, 441, 389, 402, 377, 416, 463, 505, 512, 412],
+      previous: [350, 362, 371, 340, 402, 451, 430, 366, 380, 359, 371, 420, 466, 471, 405, 352, 369, 360, 388, 421, 470, 452, 361, 377, 392, 380, 428, 476, 489, 431],
+      labels: [0, 4, 8, 12, 16, 20, 24, 28].map((d) => [d, `11-${String(d + 1).padStart(2, "0")}`] as [number, string]),
+      max: 600,
+      tip: { at: 13, title: "11 月 14 日 周六", value: "512 杯", delta: "+8.7%", note: "上月同期 471 杯" },
+    },
+    cups: 5870,
+    shares: [0.45, 0.23, 0.12, 0.14, 0.06],
+    top: [1690, 1320, 1044, 410],
+  },
+};
+
+const SHIMMER = { type: "linear" as const, angle: 90, stops: [color.crema, "#efe5d9", color.crema] };
+
+/** A grey placeholder block for the loading state. */
+function Bone({ width, height, radius: r = 6, opacity }: { width: number | "fill"; height: number | "fill"; radius?: number; opacity?: number }) {
+  return <Rect width={width} height={height} cornerRadius={r} fill={SHIMMER} opacity={opacity} />;
+}
+
+/** Centred message for a panel with nothing to show. */
+function EmptyState({ icon, title, body, action, tone = "empty" }: { icon: IconName; title: string; body?: string; action?: ReactNode; tone?: "empty" | "error" }) {
+  const error = tone === "error";
+  return (
+    <Column
+      width="fill"
+      height="fill"
+      gap={10}
+      align="center"
+      justify="center"
+      cornerRadius={radius.md}
+      fill={error ? color.tomatoSoft : undefined}
+      stroke={error ? undefined : color.oatStrong}
+      strokeDash={error ? undefined : [6, 5]}
+      strokeAlign="inside"
+    >
+      <Row width={48} height={48} align="center" justify="center" cornerRadius={24} fill={error ? color.white : color.caramelSoft}>
+        <Icon name={icon} size={22} tint={error ? color.tomato : color.roast} />
+      </Row>
+      <Text fontSize={15} fontWeight={700} color={color.espresso}>
+        {title}
+      </Text>
+      {body && (
+        <Text width={260} textAlign="center" fontSize={13} lineHeight={19} color={color.muted}>
+          {body}
+        </Text>
+      )}
+      {action}
+    </Column>
+  );
+}
+
 // ------------------------------------------------------------------ KPIs
 
-function Kpi({ icon, label, value, unit, delta, spark, tint }: { icon: IconName; label: string; value: string; unit?: string; delta: number; spark: number[]; tint: string }) {
+function Kpi({ data, compare, empty = false }: { data: KpiData; compare: string; empty?: boolean }) {
+  const { icon, label, value, unit, delta, spark, tint } = data;
   const up = delta >= 0;
   return (
     <Column padding={18} gap={12} fill={color.white} cornerRadius={radius.lg} shadow={shadow.card} align="stretch">
@@ -110,86 +262,139 @@ function Kpi({ icon, label, value, unit, delta, spark, tint }: { icon: IconName;
         </Text>
         <Icon name="ellipsis" size={16} tint={color.subtle} />
       </Row>
-      <Row align="end" justify="space-between">
+      <Row height={64} align="end" justify="space-between">
         <Column gap={6}>
-          <Text fontSize={28} fontWeight={700} tabularNums color={color.espresso}>
-            {value}
-            {unit && (
+          <Text fontSize={28} fontWeight={700} tabularNums color={empty ? color.subtle : color.espresso}>
+            {empty ? "—" : value}
+            {unit && !empty && (
               <Span fontSize={14} fontWeight={500} color={color.muted}>
                 {` ${unit}`}
               </Span>
             )}
           </Text>
-          <Row gap={4} align="center">
-            <Icon name={up ? "trendingUp" : "trendingDown"} size={14} tint={up ? color.sage : color.tomato} />
-            <Text fontSize={12} fontWeight={600} tabularNums color={up ? color.sage : color.tomato}>
-              {`${up ? "+" : ""}${delta.toFixed(1)}%`}
-            </Text>
+          {empty ? (
             <Text fontSize={12} color={color.muted}>
-              较上周同日
+              暂无数据
             </Text>
-          </Row>
+          ) : (
+            <Row gap={4} align="center">
+              <Icon name={up ? "trendingUp" : "trendingDown"} size={14} tint={up ? color.sage : color.tomato} />
+              <Text fontSize={12} fontWeight={600} tabularNums color={up ? color.sage : color.tomato}>
+                {`${up ? "+" : ""}${delta.toFixed(1)}%`}
+              </Text>
+              <Text fontSize={12} color={color.muted}>
+                {compare}
+              </Text>
+            </Row>
+          )}
         </Column>
-        <Sparkline data={spark} width={96} height={40} tint={tint} />
+        {!empty && <Sparkline data={spark} width={96} height={40} tint={tint} />}
       </Row>
+    </Column>
+  );
+}
+
+function KpiSkeleton() {
+  return (
+    <Column padding={18} gap={12} fill={color.white} cornerRadius={radius.lg} shadow={shadow.card} align="stretch">
+      <Row gap={8} align="center">
+        <Bone width={28} height={28} radius={8} />
+        <Bone width={72} height={12} />
+      </Row>
+      <Column height={64} gap={10} justify="end">
+        <Bone width={132} height={26} />
+        <Bone width={160} height={10} opacity={0.7} />
+      </Column>
     </Column>
   );
 }
 
 // ------------------------------------------------------------------ sales chart
 
-const HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
-const TODAY = [12, 46, 58, 34, 28, 41, 52, 61, 44, 38, 30, 24, 18, 14, 8];
-const LAST_WEEK = [10, 38, 50, 36, 25, 36, 44, 47, 40, 33, 28, 26, 20, 12, 9];
+// Plot width = panel (1128 - 16 - 440 - 2 * 20 padding = 632) minus the y-axis column and its gap.
+const AXIS = 32;
+const W = 632 - AXIS - 10 - 2;
+const H = 210;
 
-function SalesChart() {
-  // Plot width = panel (1128 - 16 - 440 - 2 * 20 padding) minus the y-axis column.
-  const W = 600;
-  const H = 210;
-  const max = 70;
-  const today = plot(TODAY.slice(0, 8), (W * 7) / 14, H, max, 0); // up to 14:00
-  const last = plot(LAST_WEEK, W, H, max, 0);
-  const line = smoothPath(today);
-  const [hx, hy] = today[7];
+function SalesChart({ s }: { s: Series }) {
+  const x = (slot: number) => (W * slot) / (s.slots - 1);
+  const current = plot(s.current, x(s.current.length - 1), H, s.max, 0);
+  const previous = plot(s.previous, W, H, s.max, 0);
+  const line = smoothPath(current);
+  const [hx, hy] = current[s.tip.at];
+  const [ex] = current[current.length - 1];
+  // The tooltip sits right of the point, or left of it near the right edge.
+  const flip = hx > W - 180;
   return (
     <Column width="fill" height="fill" gap={8} align="stretch">
       <Row width="fill" height="fill" gap={10}>
-        <Column height="fill" justify="space-between" align="end" padding={[0, 0, 20, 0]}>
-          {[70, 50, 25, 0].map((v) => (
-            <Text key={v} fontSize={11} tabularNums color={color.muted}>
-              {v}
+        {/* Each value sits level with its gridline. */}
+        <Frame width={AXIS} height={H}>
+          {[3, 2, 1, 0].map((i) => (
+            <Text key={i} right={0} y={Math.max(0, Math.min(H - 14, (H * (3 - i)) / 3 - 7))} fontSize={11} tabularNums color={color.muted}>
+              {String((s.max * i) / 3)}
             </Text>
           ))}
-        </Column>
+        </Frame>
         <Frame name="Plot" width={W} height={H}>
           {[0, 1, 2, 3].map((i) => (
             <Rect key={i} x={0} y={Math.min(H - 1, (H * i) / 3)} width="fill" height={1} fill={i === 3 ? color.oatStrong : color.oat} />
           ))}
-          <Path width={W} height={H} viewBox={[0, 0, W, H]} d={smoothPath(last)} stroke={color.subtle} strokeWidth={1.5} strokeDash={[4, 4]} />
-          <Path width={W} height={H} viewBox={[0, 0, W, H]} d={`${line} L ${hx} ${H} L 0 ${H} Z`} fill={{ type: "linear", angle: 180, stops: ["rgba(196, 119, 59, 0.32)", "rgba(196, 119, 59, 0)"] }} />
+          <Path width={W} height={H} viewBox={[0, 0, W, H]} d={smoothPath(previous)} stroke={color.subtle} strokeWidth={1.5} strokeDash={[4, 4]} />
+          <Path width={W} height={H} viewBox={[0, 0, W, H]} d={`${line} L ${ex} ${H} L 0 ${H} Z`} fill={{ type: "linear", angle: 180, stops: ["rgba(196, 119, 59, 0.32)", "rgba(196, 119, 59, 0)"] }} />
           <Path width={W} height={H} viewBox={[0, 0, W, H]} d={line} stroke={color.caramel} strokeWidth={3} strokeCap="round" strokeJoin="round" />
           <Rect x={hx} y={0} width={1} height={H} fill={color.roast} opacity={0.35} />
           <Ellipse x={hx - 6} y={hy - 6} width={12} height={12} fill={color.white} stroke={color.caramel} strokeWidth={3} />
-          <Column x={hx + 14} y={Math.max(0, hy - 30)} padding={[10, 12]} gap={4} cornerRadius={10} fill={color.espresso} shadow={shadow.float}>
+          <Column
+            x={flip ? undefined : hx + 14}
+            right={flip ? W - hx + 14 : undefined}
+            y={Math.max(0, Math.min(H - 76, hy - 30))}
+            padding={[10, 12]}
+            gap={4}
+            cornerRadius={10}
+            fill={color.espresso}
+            shadow={shadow.float}
+          >
             <Text fontSize={11} color={color.oatStrong}>
-              14:00 – 15:00
+              {s.tip.title}
             </Text>
             <Text fontSize={14} fontWeight={700} tabularNums color={color.white}>
-              61 杯 <Span fontSize={11} fontWeight={600} color="#8fd19e">+29.8%</Span>
+              {`${s.tip.value} `}
+              <Span fontSize={11} fontWeight={600} color="#8fd19e">
+                {s.tip.delta}
+              </Span>
             </Text>
             <Text fontSize={11} tabularNums color={color.oatStrong}>
-              上周同时段 47 杯
+              {s.tip.note}
             </Text>
           </Column>
         </Frame>
       </Row>
-      <Row padding={[0, 0, 0, 30]} justify="space-between">
-        {HOURS.filter((h) => h % 2 === 1).map((h) => (
-          <Text key={h} fontSize={11} tabularNums color={color.muted}>
-            {`${h}:00`}
-          </Text>
+      {/* Each label is centred under its slot. */}
+      <Row gap={10}>
+        <Rect width={AXIS} height={1} />
+        <Frame width={W} height={14}>
+          {s.labels.map(([slot, label]) => (
+            <Text key={label} x={Math.max(0, Math.min(W - 44, x(slot) - 22))} width={44} textAlign="center" fontSize={11} tabularNums color={color.muted}>
+              {label}
+            </Text>
+          ))}
+        </Frame>
+      </Row>
+    </Column>
+  );
+}
+
+function ChartSkeleton() {
+  const bars = [0.35, 0.6, 0.75, 0.5, 0.45, 0.62, 0.7, 0.82, 0.58, 0.5, 0.42, 0.36, 0.3, 0.22, 0.15];
+  return (
+    <Column width="fill" height="fill" gap={8} align="stretch">
+      <Row width="fill" height="fill" gap={10} align="end">
+        {bars.map((b, i) => (
+          <Bone key={i} width="fill" height={Math.round(H * b)} radius={4} />
         ))}
       </Row>
+      <Bone width="fill" height={10} opacity={0.7} />
     </Column>
   );
 }
@@ -208,11 +413,11 @@ function Legend({ tint, label, dashed = false }: { tint: string; label: string; 
 // ------------------------------------------------------------------ category donut
 
 const CATEGORIES = [
-  { label: "拿铁类", share: 0.46, tint: color.roast },
-  { label: "美式 / 冷萃", share: 0.22, tint: color.caramel },
-  { label: "手冲", share: 0.12, tint: "#8a9a5b" },
-  { label: "烘焙甜点", share: 0.14, tint: "#d9b38c" },
-  { label: "零售豆", share: 0.06, tint: color.oatStrong },
+  { label: "拿铁类", tint: color.roast },
+  { label: "美式 / 冷萃", tint: color.caramel },
+  { label: "手冲", tint: "#8a9a5b" },
+  { label: "烘焙甜点", tint: "#d9b38c" },
+  { label: "零售豆", tint: color.oatStrong },
 ];
 
 function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
@@ -220,40 +425,54 @@ function arc(cx: number, cy: number, r: number, a0: number, a1: number) {
   return `M ${p(a0)} A ${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${p(a1)}`;
 }
 
-function Donut() {
-  const size = 140;
+const DONUT = 140;
+
+function Donut({ range, data }: { range: Range; data: RangeData }) {
   const r = 56;
   const gap = 0.04;
   let at = 0;
   return (
     <Row gap={24} align="center">
-      <Frame width={size} height={size}>
-        {CATEGORIES.map((c) => {
+      <Frame width={DONUT} height={DONUT}>
+        {CATEGORIES.map((c, i) => {
           const a0 = at * Math.PI * 2 + gap;
-          at += c.share;
+          at += data.shares[i];
           const a1 = at * Math.PI * 2 - gap;
-          return <Path key={c.label} width={size} height={size} viewBox={[0, 0, size, size]} d={arc(size / 2, size / 2, r, a0, a1)} stroke={c.tint} strokeWidth={18} strokeCap="round" />;
+          return <Path key={c.label} width={DONUT} height={DONUT} viewBox={[0, 0, DONUT, DONUT]} d={arc(DONUT / 2, DONUT / 2, r, a0, a1)} stroke={c.tint} strokeWidth={18} strokeCap="round" />;
         })}
         <Column width="fill" height="fill" align="center" justify="center" gap={0}>
           <Text fontSize={24} fontWeight={700} tabularNums color={color.espresso}>
-            412
+            {data.cups.toLocaleString("en-US")}
           </Text>
           <Text fontSize={11} color={color.muted}>
-            今日杯数
+            {`${range}杯数`}
           </Text>
         </Column>
       </Frame>
       <Column width="fill" gap={8} align="stretch">
-        {CATEGORIES.map((c) => (
+        {CATEGORIES.map((c, i) => (
           <Row key={c.label} gap={8} align="center">
             <Rect width={10} height={10} cornerRadius={3} fill={c.tint} />
             <Text width="fill" fontSize={13} color={color.espresso}>
               {c.label}
             </Text>
             <Text fontSize={13} fontWeight={600} tabularNums color={color.espresso}>
-              {`${Math.round(c.share * 100)}%`}
+              {`${Math.round(data.shares[i] * 100)}%`}
             </Text>
           </Row>
+        ))}
+      </Column>
+    </Row>
+  );
+}
+
+function DonutSkeleton() {
+  return (
+    <Row gap={24} align="center">
+      <Ellipse width={DONUT} height={DONUT} stroke="#efe5d9" strokeWidth={18} strokeAlign="inside" />
+      <Column width="fill" gap={12} align="stretch">
+        {[0, 1, 2, 3, 4].map((i) => (
+          <Bone key={i} width="fill" height={10} opacity={i % 2 ? 0.7 : 1} />
         ))}
       </Column>
     </Row>
@@ -327,20 +546,15 @@ function StockTable() {
 
 // ------------------------------------------------------------------ top products
 
-const TOP = [
-  { p: byId.osmanthus, cups: 128 },
-  { p: byId.iced, cups: 96 },
-  { p: byId.americano, cups: 74 },
-  { p: byId.pourover, cups: 31 },
-];
+const TOP = [byId.osmanthus, byId.iced, byId.americano, byId.pourover];
 
-function TopProducts() {
+function TopProducts({ cups }: { cups: number[] }) {
   return (
     <Column gap={14} align="stretch">
-      {TOP.map(({ p, cups }, i) => (
+      {TOP.map((p, i) => (
         <Row key={p.id} gap={12} align="center">
           <Text width={14} fontFamily={font.mono} fontSize={13} fontWeight={700} color={i === 0 ? color.caramelText : color.muted}>
-            {i + 1}
+            {String(i + 1)}
           </Text>
           <Image src={p.image} width={36} height={36} cornerRadius={8} />
           <Column width="fill" gap={6} align="stretch">
@@ -349,14 +563,32 @@ function TopProducts() {
                 {p.name}
               </Text>
               <Text fontSize={13} fontWeight={600} tabularNums color={color.espresso}>
-                {cups}
+                {cups[i].toLocaleString("en-US")}
                 <Span fontSize={11} fontWeight={400} color={color.muted}>
                   {" 杯"}
                 </Span>
               </Text>
             </Row>
-            <ProgressBar value={cups / TOP[0].cups} height={5} tint={i === 0 ? color.caramel : color.oatStrong} track={color.crema} />
+            <ProgressBar value={cups[i] / cups[0]} height={5} tint={i === 0 ? color.caramel : color.oatStrong} track={color.crema} />
           </Column>
+        </Row>
+      ))}
+    </Column>
+  );
+}
+
+/** Rows of placeholders for a list or table that is still loading. */
+function ListSkeleton({ rows, thumb = true }: { rows: number; thumb?: boolean }) {
+  return (
+    <Column gap={14} align="stretch">
+      {Array.from({ length: rows }, (_, i) => (
+        <Row key={i} gap={12} align="center">
+          {thumb && <Bone width={36} height={36} radius={8} />}
+          <Column width="fill" gap={8} align="stretch">
+            <Bone width={i % 2 ? 140 : 180} height={12} />
+            <Bone width="fill" height={8} opacity={0.7} />
+          </Column>
+          <Bone width={48} height={20} radius={10} />
         </Row>
       ))}
     </Column>
@@ -365,7 +597,19 @@ function TopProducts() {
 
 // ------------------------------------------------------------------ page
 
+/**
+ * The manager's overview. Variants: the reporting range, and the data state (normal, empty
+ * before opening, POS error, loading). In Play mode the range control switches ranges, and
+ * 开始营业 / 重试 move the empty and error states back to normal.
+ */
 export function Dashboard() {
+  const [range, setRange] = useVariant("时间范围", ["今日", "本周", "本月"] as Range[]);
+  const [status, setStatus] = useVariant("数据状态", ["正常", "空", "错误", "加载"] as Status[]);
+  const data = RANGES[range];
+  const loading = status === "加载";
+  const empty = status === "空";
+  const error = status === "错误";
+
   return (
     <Frame width={1440} height={900} fill={color.crema}>
       <Row width="fill" height="fill" align="stretch">
@@ -376,45 +620,82 @@ export function Dashboard() {
               <Text fontFamily={font.display} fontSize={30} fontWeight={600} color={color.espresso}>
                 经营概览
               </Text>
-              <Text fontSize={13} color={color.muted}>
-                武康路店 · 2026 年 11 月 15 日 周日 · 数据更新于 <Span fontFamily={font.mono}>14:32</Span>
-              </Text>
+              {error ? (
+                <Row gap={6} align="center">
+                  <Icon name="triangleAlert" size={14} tint={color.tomato} />
+                  <Text fontSize={13} color={color.tomato}>
+                    门店 POS 连接超时，数据停留在 <Span fontFamily={font.mono}>14:31</Span>
+                  </Text>
+                  <Text fontSize={13} fontWeight={700} color={color.tomato} textDecoration="underline" onClick={() => setStatus("正常")}>
+                    重试
+                  </Text>
+                </Row>
+              ) : (
+                <Text fontSize={13} color={color.muted}>
+                  {`武康路店 · ${data.period} · `}
+                  {loading ? "正在同步门店数据…" : "数据更新于 "}
+                  {!loading && <Span fontFamily={font.mono}>14:32</Span>}
+                </Text>
+              )}
             </Column>
             <Input placeholder="搜索订单号、会员、商品" icon="search" width={260} />
-            <Segmented options={["今日", "本周", "本月"]} value="今日" width={210} />
-            <Button variant="outline" icon="download">
+            <Segmented options={["今日", "本周", "本月"]} value={range} onChange={(v) => setRange(v as Range)} width={210} />
+            <Button variant="outline" icon="download" disabled={loading || empty}>
               导出报表
             </Button>
           </Row>
 
           <Grid columns={4} gap={16}>
-            <Kpi icon="wallet" label="营业额" value="¥18,240" delta={12.4} spark={[8, 12, 10, 14, 13, 17, 18]} tint={color.caramel} />
-            <Kpi icon="receipt" label="订单数" value="412" unit="单" delta={8.1} spark={[30, 34, 31, 36, 40, 38, 41]} tint={color.roast} />
-            <Kpi icon="users" label="客单价" value="¥44.3" delta={-2.6} spark={[47, 46, 46, 45, 44, 45, 44]} tint={color.sky} />
-            <Kpi icon="refreshCw" label="会员复购率" value="38" unit="%" delta={4.2} spark={[30, 31, 33, 32, 35, 36, 38]} tint={color.sage} />
+            {data.kpis.map((k) => (loading ? <KpiSkeleton key={k.label} /> : <Kpi key={k.label} data={k} compare={data.compare} empty={empty} />))}
           </Grid>
 
           <Row height={330} gap={16} align="stretch">
             <Panel
-              title="分时段出杯"
+              title={data.series.title}
               grow={2}
               action={
-                <Row gap={16}>
-                  <Legend tint={color.caramel} label="今日" />
-                  <Legend tint={color.subtle} label="上周同日" dashed />
-                </Row>
+                !loading &&
+                !empty && (
+                  <Row gap={16}>
+                    <Legend tint={color.caramel} label={data.series.legend[0]} />
+                    <Legend tint={color.subtle} label={data.series.legend[1]} dashed />
+                  </Row>
+                )
               }
             >
-              <SalesChart />
+              {loading ? (
+                <ChartSkeleton />
+              ) : empty ? (
+                <EmptyState
+                  icon="coffee"
+                  title="还没有订单"
+                  body="开门营业后，小程序与外卖订单会实时出现在这里。"
+                  action={
+                    <Button variant="secondary" size="sm" icon="store" onClick={() => setStatus("正常")}>
+                      开始营业
+                    </Button>
+                  }
+                />
+              ) : (
+                <SalesChart s={data.series} />
+              )}
             </Panel>
             <Panel title="品类占比" width={440} action={<Text fontSize={12} color={color.muted}>按杯数</Text>}>
-              <Donut />
-              <Row padding={12} gap={10} align="center" cornerRadius={12} fill={color.caramelSoft}>
-                <Icon name="sparkles" size={16} tint={color.roast} />
-                <Text width="fill" fontSize={12} lineHeight={17} color={color.roast}>
-                  桂花拿铁上线 9 天，拉动拿铁类占比 <Span fontWeight={700}>+7%</Span>，可考虑在午市加推第二杯半价。
-                </Text>
-              </Row>
+              {loading ? (
+                <DonutSkeleton />
+              ) : empty ? (
+                <EmptyState icon="chartColumn" title="暂无数据" body="有订单后按品类统计杯数。" />
+              ) : (
+                <>
+                  <Donut range={range} data={data} />
+                  <Row padding={12} gap={10} align="center" cornerRadius={12} fill={color.caramelSoft}>
+                    <Icon name="sparkles" size={16} tint={color.roast} />
+                    <Text width="fill" fontSize={12} lineHeight={17} color={color.roast}>
+                      桂花拿铁上线 9 天，拉动拿铁类占比 <Span fontWeight={700}>+7%</Span>，可考虑在午市加推第二杯半价。
+                    </Text>
+                  </Row>
+                </>
+              )}
             </Panel>
           </Row>
 
@@ -423,15 +704,38 @@ export function Dashboard() {
               title="库存预警"
               grow={2}
               action={
-                <Button variant="secondary" size="sm" icon="package">
-                  一键补货
-                </Button>
+                !loading &&
+                !error && (
+                  <Button variant="secondary" size="sm" icon="package">
+                    一键补货
+                  </Button>
+                )
               }
             >
-              <StockTable />
+              {loading ? (
+                <ListSkeleton rows={4} thumb={false} />
+              ) : error ? (
+                <EmptyState
+                  tone="error"
+                  icon="triangleAlert"
+                  title="库存数据加载失败"
+                  action={
+                    <Row gap={8} align="center">
+                      <Button variant="danger" size="sm" icon="refreshCw" onClick={() => setStatus("正常")}>
+                        重试
+                      </Button>
+                      <Text fontFamily={font.mono} fontSize={11} color={color.muted}>
+                        ERR_POS_TIMEOUT · 14:31
+                      </Text>
+                    </Row>
+                  }
+                />
+              ) : (
+                <StockTable />
+              )}
             </Panel>
-            <Panel title="热销单品" width={440} action={<Text fontSize={12} color={color.muted}>今日 · 杯</Text>}>
-              <TopProducts />
+            <Panel title="热销单品" width={440} action={<Text fontSize={12} color={color.muted}>{`${range} · 杯`}</Text>}>
+              {loading ? <ListSkeleton rows={4} /> : empty ? <EmptyState icon="cupSoda" title="暂无销量" /> : <TopProducts cups={data.top} />}
             </Panel>
           </Row>
         </Column>
@@ -439,87 +743,3 @@ export function Dashboard() {
     </Frame>
   );
 }
-
-// ------------------------------------------------------------------ states
-
-function StateCard({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <Column width="fill" gap={12} align="stretch">
-      <Text fontFamily={font.mono} fontSize={11} color={color.muted}>
-        {title}
-      </Text>
-      <Column width="fill" height={300} padding={20} gap={16} fill={color.white} cornerRadius={radius.lg} shadow={shadow.card} align="stretch">
-        {children}
-      </Column>
-    </Column>
-  );
-}
-
-const SHIMMER = { type: "linear" as const, angle: 90, stops: [color.crema, "#efe5d9", color.crema] };
-
-export function DashboardStates() {
-  return (
-    <Row width={1200} padding={32} gap={24} fill={color.crema}>
-      <StateCard title="empty · 今日暂无订单">
-        <Text fontSize={16} fontWeight={700} color={color.espresso}>
-          今日订单
-        </Text>
-        <Column width="fill" height="fill" gap={12} align="center" justify="center" cornerRadius={radius.md} stroke={color.oatStrong} strokeDash={[6, 5]} strokeAlign="inside">
-          <Row width={56} height={56} align="center" justify="center" cornerRadius={28} fill={color.caramelSoft}>
-            <Icon name="coffee" size={26} tint={color.roast} />
-          </Row>
-          <Text fontSize={15} fontWeight={700} color={color.espresso}>
-            还没有订单
-          </Text>
-          <Text width={220} textAlign="center" fontSize={13} lineHeight={19} color={color.muted}>
-            开门营业后，小程序与外卖订单会实时出现在这里。
-          </Text>
-          <Button variant="secondary" size="sm" icon="store">
-            开始营业
-          </Button>
-        </Column>
-      </StateCard>
-
-      <StateCard title="error · 加载失败">
-        <Text fontSize={16} fontWeight={700} color={color.espresso}>
-          库存预警
-        </Text>
-        <Column width="fill" height="fill" gap={12} align="center" justify="center" cornerRadius={radius.md} fill={color.tomatoSoft}>
-          <Row width={56} height={56} align="center" justify="center" cornerRadius={28} fill={color.white}>
-            <Icon name="triangleAlert" size={26} tint={color.tomato} />
-          </Row>
-          <Text fontSize={15} fontWeight={700} color={color.espresso}>
-            库存数据加载失败
-          </Text>
-          <Text width={240} textAlign="center" fontSize={13} lineHeight={19} color={color.muted}>
-            门店 POS 暂时无法连接，已显示的数字可能不是最新。
-          </Text>
-          <Row gap={8} align="center">
-            <Button variant="danger" size="sm" icon="refreshCw">
-              重试
-            </Button>
-            <Text fontFamily={font.mono} fontSize={11} color={color.muted}>
-              ERR_POS_TIMEOUT · 14:31
-            </Text>
-          </Row>
-        </Column>
-      </StateCard>
-
-      <StateCard title="loading · 骨架屏">
-        <Rect width={120} height={16} cornerRadius={6} fill={SHIMMER} />
-        {[0, 1, 2, 3].map((i) => (
-          <Row key={i} gap={12} align="center">
-            <Rect width={40} height={40} cornerRadius={10} fill={SHIMMER} />
-            <Column width="fill" gap={8} align="stretch">
-              <Rect width={i % 2 ? 140 : 180} height={12} cornerRadius={5} fill={SHIMMER} />
-              <Rect width="fill" height={10} cornerRadius={5} fill={SHIMMER} opacity={0.7} />
-            </Column>
-            <Rect width={48} height={22} cornerRadius={11} fill={SHIMMER} />
-          </Row>
-        ))}
-      </StateCard>
-    </Row>
-  );
-}
-
-export { products };
