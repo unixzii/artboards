@@ -30,7 +30,8 @@ import type { RenderEngine } from "../../shared/engine.ts";
 import { paintNode } from "../../shared/paint.ts";
 import type { PaintableNode } from "../../shared/scene.ts";
 import { textSizeOf } from "../../shared/text.ts";
-import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewFrame, type ViewNode } from "../core/model.ts";
+import { measure } from "../core/measure.ts";
+import { bounds, canvasBox, EMPTY_MODEL, hitTest, type Model, type Point, type ViewFrame, type ViewNode } from "../core/model.ts";
 import type { StageBackend, StageElements } from "../core/viewer.ts";
 
 const MIN_ZOOM = 0.02;
@@ -87,7 +88,7 @@ export class Renderer implements StageBackend {
   private ck: CanvasKit;
   private els: StageElements;
   private engine: RenderEngine;
-  private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint };
+  private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint; measure: Paint };
   private surface: Surface | null = null;
   private recordings = new Map<string, Recording>();
   private tiles = new Map<string, Tile>();
@@ -106,6 +107,7 @@ export class Renderer implements StageBackend {
   private model: Model = EMPTY_MODEL;
   private selected: ViewNode | null = null;
   private hovered: ViewNode | null = null;
+  private measuring = false;
   /** World-to-canvas transform. */
   private view = { s: 1, tx: 0, ty: 0 };
   /** The stage's box in canvas coordinates: the part of the canvas that shows. */
@@ -139,6 +141,8 @@ export class Renderer implements StageBackend {
       compSelect: stroke(124, 58, 237),
       compHover: stroke(124, 58, 237, 0.55),
       error: stroke(220, 38, 38),
+      // Measuring lines and the target outline; the stage overlay's .measure-label matches it.
+      measure: stroke(242, 72, 34),
     };
 
     this.layout();
@@ -223,10 +227,11 @@ export class Renderer implements StageBackend {
     return picture;
   }
 
-  setHighlight(selected: ViewNode | null, hovered: ViewNode | null) {
-    if (this.selected === selected && this.hovered === hovered) return;
+  setHighlight(selected: ViewNode | null, hovered: ViewNode | null, measuring: boolean) {
+    if (this.selected === selected && this.hovered === hovered && this.measuring === measuring) return;
     this.selected = selected;
     this.hovered = hovered;
+    this.measuring = measuring;
     this.requestDraw();
   }
 
@@ -466,6 +471,23 @@ export class Renderer implements StageBackend {
     canvas.restore();
   }
 
+  /** The target outlined in red, solid lines for each distance, dashed guides where a line passes beside the target. */
+  private drawMeasurement(canvas: Canvas, from: ViewNode, to: ViewNode) {
+    const { ck, paints, view } = this;
+    const paint = paints.measure;
+    this.outline(canvas, to, paint, 1);
+    const { gaps, guides } = measure(canvasBox(from), canvasBox(to));
+    paint.setStrokeWidth(1 / view.s);
+    for (const g of gaps) canvas.drawLine(g.from.x, g.from.y, g.to.x, g.to.y, paint);
+    if (guides.length) {
+      const dash = ck.PathEffect.MakeDash([4 / view.s, 3 / view.s], 0);
+      paint.setPathEffect(dash);
+      for (const g of guides) canvas.drawLine(g.from.x, g.from.y, g.to.x, g.to.y, paint);
+      paint.setPathEffect(null);
+      dash?.delete();
+    }
+  }
+
   private draw() {
     const { ck, surface, view, paints, dpr } = this;
     cancelAnimationFrame(this.frame);
@@ -527,7 +549,9 @@ export class Renderer implements StageBackend {
       }
       canvas.restore();
     }
-    if (this.hovered && this.hovered !== this.selected) {
+    if (this.measuring && this.selected && this.hovered && this.hovered !== this.selected) {
+      this.drawMeasurement(canvas, this.selected, this.hovered);
+    } else if (this.hovered && this.hovered !== this.selected) {
       this.outline(canvas, this.hovered, this.hovered.component ? paints.compHover : paints.hover, 1.5);
     }
     if (this.selected) {

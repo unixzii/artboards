@@ -4,6 +4,7 @@
 //   click           select / comment    ctrl|cmd+wheel   zoom at cursor
 //   play mode: click runs onClick; drag and wheel scroll `scroll` containers
 //   two fingers     pinch zoom + pan    V C P Esc 0 !    tools, deselect, 100%, fit
+//   hold Option/Alt  measure from the selected layer to the hovered one
 
 import type { Point } from "../core/model.ts";
 import type { Viewer } from "../core/viewer.ts";
@@ -39,6 +40,7 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
   });
 
   on(stage, "pointermove", (e) => {
+    viewer.setMeasuring(e.altKey); // catches a key pressed while the window was unfocused
     const p = local(e);
     const prev = pointers.get(e.pointerId);
     if (!prev) {
@@ -84,6 +86,13 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
     },
     false,
   );
+
+  const altKey = (e: KeyboardEvent) => {
+    if (e.key === "Alt") viewer.setMeasuring(e.type === "keydown");
+  };
+  on(window, "keydown", altKey);
+  on(window, "keyup", altKey);
+  on(window, "blur", () => viewer.setMeasuring(false));
 
   on(window, "keydown", (e) => {
     if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return;

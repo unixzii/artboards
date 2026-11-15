@@ -406,6 +406,21 @@ svg.lucide { flex: none; display: block; }
   pointer-events: none;
 }
 .size-badge.comp { background: #7c3aed; }
+/* Distance labels for Option/Alt measuring (renderer.ts draws the lines in the same red).
+   Beside a vertical line, below a horizontal one. */
+.measure-label {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f24822;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.measure-label.x { --shift: translate(-50%, 4px); }
+.measure-label.y { --shift: translate(4px, -50%); }
 .pin {
   margin: -22px 0 0 0;
   width: 22px;

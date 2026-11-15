@@ -268,18 +268,26 @@ export function sizing(node: ViewNode, axis: "width" | "height"): Sizing | null 
   return cross && (p.alignSelf ?? parent.props.align ?? "start") === "stretch" ? "Fill" : "Hug";
 }
 
-/** The bottom-centre of the node's on-canvas box (rotation included), in canvas coordinates. */
-export function bottomCenter(node: ViewNode): Point {
+export interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** The node's on-canvas bounding box (rotation included), in canvas coordinates. */
+export function canvasBox(node: ViewNode): Box {
   const [a, b, c, d, e, f] = node.matrix;
   const { width: w, height: h } = node.layout;
-  const corners = [
-    [0, 0],
-    [w, 0],
-    [0, h],
-    [w, h],
-  ].map(([x, y]) => ({ x: a * x + c * y + e, y: b * x + d * y + f }));
-  const xs = corners.map((q) => q.x);
-  return { x: node.frame.x + (Math.min(...xs) + Math.max(...xs)) / 2, y: node.frame.y + Math.max(...corners.map((q) => q.y)) };
+  const xs = [e, a * w + e, c * h + e, a * w + c * h + e].map((x) => x + node.frame.x);
+  const ys = [f, b * w + f, d * h + f, b * w + d * h + f].map((y) => y + node.frame.y);
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+
+/** The bottom-centre of the node's on-canvas box, in canvas coordinates. */
+export function bottomCenter(node: ViewNode): Point {
+  const box = canvasBox(node);
+  return { x: (box.x0 + box.x1) / 2, y: box.y1 };
 }
 
 export function bounds(frames: ViewFrame[]) {

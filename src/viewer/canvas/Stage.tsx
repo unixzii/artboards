@@ -5,7 +5,8 @@
 import { ChevronRight, Component, RotateCcw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useViewer, useViewerState } from "../core/context.ts";
-import { bottomCenter, describe, pinPosition, sizing, type ViewFrame, type ViewNode } from "../core/model.ts";
+import { measure } from "../core/measure.ts";
+import { bottomCenter, canvasBox, describe, pinPosition, sizing, type ViewFrame, type ViewNode } from "../core/model.ts";
 import { anchor } from "./anchor.ts";
 import { attachInput } from "./input.ts";
 
@@ -108,6 +109,28 @@ function SizeBadge() {
   );
 }
 
+/** While Option/Alt is held: the length of each line the renderer draws between the selected and hovered layers. */
+function Measurements() {
+  const viewer = useViewer();
+  const measuring = useViewerState((s) => s.measuring);
+  const selectedKey = useViewerState((s) => s.selected);
+  const hovered = useViewerState((s) => s.hovered);
+  useViewerState((s) => s.model); // keys can point at new nodes after a rebuild
+  useViewerState((s) => s.scrollTick); // follows layers that scroll
+  const selected = viewer.node(selectedKey);
+  const target = viewer.node(hovered);
+  if (!measuring || !selected || !target || target === selected) return null;
+  return measure(canvasBox(selected), canvasBox(target)).gaps.map((g, i) => (
+    <div
+      key={i}
+      className={`anchored measure-label ${g.axis}`}
+      style={anchor({ x: (g.from.x + g.to.x) / 2, y: (g.from.y + g.to.y) / 2 })}
+    >
+      {Math.round(g.length * 100) / 100}
+    </div>
+  ));
+}
+
 function Notice() {
   const notice = useViewerState((s) => s.notice);
   return notice ? <div id="notice">{notice}</div> : null;
@@ -189,6 +212,7 @@ export function Stage() {
           <FrameLabel key={frame.name} frame={frame} />
         ))}
         <SizeBadge />
+        <Measurements />
         <Pins />
         <CommentBox />
       </div>

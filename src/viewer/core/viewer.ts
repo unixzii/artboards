@@ -40,6 +40,8 @@ export interface ViewerState {
   notice: string | null;
   /** Bumped whenever a container scrolls, so overlays anchored to layers follow. */
   scrollTick: number;
+  /** Option/Alt is held: show distances from the selected layer to the hovered one. */
+  measuring: boolean;
 }
 
 export interface StageElements {
@@ -53,7 +55,8 @@ export interface StageBackend {
   setModel(model: Model): void;
   /** Repaints one artboard after something inside it moved, e.g. a scroll. */
   refreshFrame(frame: ViewFrame): void;
-  setHighlight(selected: ViewNode | null, hovered: ViewNode | null): void;
+  /** `measuring`: draw the distances between the two instead of a plain hover outline. */
+  setHighlight(selected: ViewNode | null, hovered: ViewNode | null, measuring: boolean): void;
   toWorld(screen: Point): Point;
   hitTest(screen: Point): ViewNode | null;
   panBy(dx: number, dy: number): void;
@@ -81,6 +84,7 @@ export class Viewer {
     clickable: false,
     notice: null,
     scrollTick: 0,
+    measuring: false,
   });
   private createBackend: StageBackendFactory;
   private host: DesignHost;
@@ -198,8 +202,8 @@ export class Viewer {
   }
 
   private syncHighlight() {
-    const { selected, hovered } = this.store.get();
-    this.renderer?.setHighlight(this.node(selected), this.node(hovered));
+    const { selected, hovered, measuring } = this.store.get();
+    this.renderer?.setHighlight(this.node(selected), this.node(hovered), measuring);
   }
 
   // ----------------------------------------------------------------- viewport
@@ -238,6 +242,14 @@ export class Viewer {
     if (node && opts.reveal) this.renderer?.reveal(node);
   }
 
+  /** Option/Alt pressed or released. Measuring works with the select tool only. */
+  setMeasuring(held: boolean) {
+    const measuring = held && this.store.get().tool === "select";
+    if (measuring === this.store.get().measuring) return;
+    this.store.set({ measuring });
+    this.syncHighlight();
+  }
+
   hover(key: string | null) {
     this.store.set({ hovered: key });
     this.syncHighlight();
@@ -267,7 +279,7 @@ export class Viewer {
   }
 
   setTool(tool: Tool) {
-    this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false });
+    this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false, measuring: false });
     if (tool === "play") this.hover(null);
   }
 
