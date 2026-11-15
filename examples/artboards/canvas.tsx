@@ -95,16 +95,29 @@ function DesktopContent() {
   );
 }
 
-/** A square selection handle centred on a corner of its parent. */
-function Handle({ corner }: { corner: "tl" | "tr" | "bl" | "br" }) {
-  const h = -4;
-  const place = {
+/** A square selection handle centred on a corner of its parent, `inset` px outside it. */
+function Handle({ corner, inset }: { corner: "tl" | "tr" | "bl" | "br"; inset: number }) {
+  const h = -4 - inset;
+  const corners: Record<typeof corner, { x?: number; y?: number; right?: number; bottom?: number }> = {
     tl: { x: h, y: h },
     tr: { right: h, y: h },
     bl: { x: h, bottom: h },
     br: { right: h, bottom: h },
-  }[corner];
-  return <Rect name={`handle ${corner}`} absolute {...place} width={8} height={8} fill={color.surface} stroke={color.accent} strokeWidth={1.5} />;
+  };
+  return <Rect name={`handle ${corner}`} absolute {...corners[corner]} width={8} height={8} fill={color.surface} stroke={color.accent} strokeWidth={1.5} />;
+}
+
+/** The selection outline and corner handles, over the whole of its parent. */
+export function SelectionMarks({ inset = 0 }: { inset?: number }) {
+  return (
+    <>
+      <Rect name="outline" absolute x={-inset} y={-inset} right={-inset} bottom={-inset} stroke={color.accent} strokeWidth={1.5} />
+      <Handle corner="tl" inset={inset} />
+      <Handle corner="tr" inset={inset} />
+      <Handle corner="bl" inset={inset} />
+      <Handle corner="br" inset={inset} />
+    </>
+  );
 }
 
 /** Draws the viewer's selection box around its child, with corner handles. */
@@ -112,11 +125,7 @@ export function Selection({ children, padding = 0, decoration }: { children: Rea
   return (
     <Row name="selection" padding={padding}>
       {children}
-      <Rect name="outline" absolute x={0} y={0} right={0} bottom={0} stroke={color.accent} strokeWidth={1.5} />
-      <Handle corner="tl" />
-      <Handle corner="tr" />
-      <Handle corner="bl" />
-      <Handle corner="br" />
+      <SelectionMarks />
       {decoration}
     </Row>
   );
