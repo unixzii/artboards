@@ -7,8 +7,14 @@
 // panel, resizing the window) therefore only changes which part of the canvas
 // shows: the surface is not reallocated and the design stays where it is on
 // screen. Points passed in and out of this class are relative to the stage.
+//
+// Replaying a picture at a scale it has not been drawn at before is slow: every
+// glyph is rasterised again. A pinch changes the scale on every frame, so while
+// one is under way artboards are drawn from textures ("tiles") rendered a
+// moment earlier and merely stretched; the pictures are replayed again, sharp,
+// once the zoom settles.
 
-import type { Canvas, CanvasKit, Paint, SkPicture, Surface } from "canvaskit-wasm";
+import type { Canvas, CanvasKit, Image, Paint, SkPicture, Surface } from "canvaskit-wasm";
 import type { RenderEngine } from "../../shared/engine.ts";
 import { paintNode } from "../../shared/paint.ts";
 import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewFrame, type ViewNode } from "../core/model.ts";
@@ -17,6 +23,28 @@ import type { StageBackend, StageElements } from "../core/viewer.ts";
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 64;
 
+/** A zoom step this soon after the last one is part of a gesture. */
+const SETTLE_MS = 150;
+/** Tiles outlive the gesture by this long, so one that pauses and resumes reuses them. */
+const TILE_TTL_MS = 2000;
+/** How far past the viewport a tile reaches, as a fraction of the viewport's size. */
+const TILE_MARGIN = 0.25;
+/** A tile is redrawn once it is stretched or shrunk past these factors. */
+const TILE_MAX_STRETCH = 1.5;
+const TILE_MIN_STRETCH = 0.5;
+const TILE_MAX_SIDE = 8192;
+
+/** Part of an artboard rendered to a texture, in the artboard's coordinates. */
+interface Tile {
+  image: Image;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Device pixels per artboard unit the tile was rendered for. */
+  scale: number;
+}
+
 export class Renderer implements StageBackend {
   private ck: CanvasKit;
   private els: StageElements;
@@ -24,6 +52,12 @@ export class Renderer implements StageBackend {
   private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint };
   private surface: Surface | null = null;
   private pictures = new Map<string, SkPicture>();
+  private tiles = new Map<string, Tile>();
+  /** Whether a zoom gesture is under way, i.e. artboards are drawn from tiles. */
+  private zooming = false;
+  private zoomedAt = -Infinity;
+  private settleTimer: ReturnType<typeof setTimeout> | undefined;
+  private tileTimer: ReturnType<typeof setTimeout> | undefined;
   private model: Model = EMPTY_MODEL;
   private selected: ViewNode | null = null;
   private hovered: ViewNode | null = null;
@@ -75,6 +109,8 @@ export class Renderer implements StageBackend {
     window.removeEventListener("resize", this.layout);
     this.scheme.removeEventListener("change", this.requestDraw);
     cancelAnimationFrame(this.frame);
+    clearTimeout(this.settleTimer);
+    clearTimeout(this.tileTimer);
     this.setModel(EMPTY_MODEL);
     this.surface?.delete();
     this.surface = null;
@@ -86,6 +122,7 @@ export class Renderer implements StageBackend {
   setModel(model: Model) {
     for (const picture of this.pictures.values()) picture.delete();
     this.pictures.clear();
+    this.dropTiles();
     this.model = model;
     this.selected = this.hovered = null;
     for (const f of model.frames) this.record(f);
@@ -95,6 +132,8 @@ export class Renderer implements StageBackend {
   refreshFrame(frame: ViewFrame) {
     this.pictures.get(frame.name)?.delete();
     this.pictures.delete(frame.name);
+    this.tiles.get(frame.name)?.image.delete();
+    this.tiles.delete(frame.name);
     this.record(frame);
     this.requestDraw();
   }
@@ -142,8 +181,76 @@ export class Renderer implements StageBackend {
     const y = at.y + this.viewport.y;
     this.view.tx = x - ((x - this.view.tx) * s) / this.view.s;
     this.view.ty = y - ((y - this.view.ty) * s) / this.view.s;
+    if (s !== this.view.s) this.zoomStep();
     this.view.s = s;
     this.requestDraw();
+  }
+
+  /**
+   * Notes a change of scale. A lone step (a toolbar button, one wheel notch) is
+   * drawn sharp straight away; a second one close behind starts a gesture.
+   */
+  private zoomStep() {
+    const now = performance.now();
+    if (now - this.zoomedAt < SETTLE_MS || this.tiles.size > 0) this.zooming = true;
+    this.zoomedAt = now;
+    clearTimeout(this.settleTimer);
+    clearTimeout(this.tileTimer);
+    this.settleTimer = setTimeout(() => {
+      if (!this.zooming) return;
+      this.zooming = false;
+      this.requestDraw();
+    }, SETTLE_MS);
+    this.tileTimer = setTimeout(() => this.dropTiles(), TILE_TTL_MS);
+  }
+
+  private dropTiles() {
+    for (const tile of this.tiles.values()) tile.image.delete();
+    this.tiles.clear();
+  }
+
+  /**
+   * The tile to draw an artboard from during a zoom gesture, rendering it first
+   * if there is none, it no longer covers what shows of the artboard (`x0..y1`,
+   * in the artboard's coordinates), or it has gone soft. Tiles that still cover
+   * are sharpened one per frame, so a gesture never pays for all of them at once.
+   */
+  private tileFor(f: ViewFrame, picture: SkPicture, x0: number, y0: number, x1: number, y1: number, budget: { sharpened: boolean }): Tile | null {
+    const scale = this.view.s * this.dpr;
+    const old = this.tiles.get(f.name);
+    if (old) {
+      const slack = 0.5 / scale;
+      const covers = old.x <= x0 + slack && old.y <= y0 + slack && old.x + old.w >= x1 - slack && old.y + old.h >= y1 - slack;
+      const stretch = scale / old.scale;
+      const sharp = stretch <= TILE_MAX_STRETCH && stretch >= TILE_MIN_STRETCH;
+      if (covers && (sharp || budget.sharpened)) return old;
+      if (covers) budget.sharpened = true;
+    }
+
+    // What shows plus a margin, so the tile survives some panning and zooming out.
+    const mx = (this.viewport.width / this.view.s) * TILE_MARGIN;
+    const my = (this.viewport.height / this.view.s) * TILE_MARGIN;
+    const x = Math.max(0, x0 - mx);
+    const y = Math.max(0, y0 - my);
+    const w = Math.min(f.w, x1 + mx) - x;
+    const h = Math.min(f.h, y1 + my) - y;
+    const texels = Math.min(scale, TILE_MAX_SIDE / w, TILE_MAX_SIDE / h);
+    const width = Math.max(1, Math.ceil(w * texels));
+    const height = Math.max(1, Math.ceil(h * texels));
+    const target = this.surface!.makeSurface({ ...this.surface!.imageInfo(), width, height });
+    if (!target) return old ?? null;
+    const canvas = target.getCanvas();
+    canvas.clear(this.ck.WHITE);
+    canvas.scale(texels, texels);
+    canvas.translate(-x, -y);
+    canvas.drawPicture(picture);
+    const image = target.makeImageSnapshot();
+    target.delete();
+
+    old?.image.delete();
+    const tile: Tile = { image, x, y, w: width / texels, h: height / texels, scale };
+    this.tiles.set(f.name, tile);
+    return tile;
   }
 
   resetZoom() {
@@ -259,6 +366,7 @@ export class Renderer implements StageBackend {
     // Only artboards that intersect the visible part of the canvas are replayed.
     const min = this.toWorld({ x: 0, y: 0 });
     const max = this.toWorld({ x: this.size.width, y: this.size.height });
+    const budget = { sharpened: false };
     for (const f of this.model.frames) {
       if (f.x > max.x || f.y > max.y || f.x + f.w < min.x || f.y + f.h < min.y) continue;
       const rect = ck.LTRBRect(f.x, f.y, f.x + f.w, f.y + f.h);
@@ -268,7 +376,15 @@ export class Renderer implements StageBackend {
         canvas.save();
         canvas.clipRect(rect, ck.ClipOp.Intersect, true);
         canvas.translate(f.x, f.y);
-        canvas.drawPicture(picture);
+        const tile = this.zooming
+          ? this.tileFor(f, picture, Math.max(0, min.x - f.x), Math.max(0, min.y - f.y), Math.min(f.w, max.x - f.x), Math.min(f.h, max.y - f.y), budget)
+          : null;
+        if (tile) {
+          const src = ck.XYWHRect(0, 0, tile.image.width(), tile.image.height());
+          canvas.drawImageRectOptions(tile.image, src, ck.XYWHRect(tile.x, tile.y, tile.w, tile.h), ck.FilterMode.Linear, ck.MipmapMode.None, null);
+        } else {
+          canvas.drawPicture(picture);
+        }
         canvas.restore();
       } else {
         paints.error.setStrokeWidth(1.5 / view.s);
