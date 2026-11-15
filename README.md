@@ -130,6 +130,7 @@ Source layout:
 - `src/viewer/`: the browser viewer
 - `src/shared/`: the DSL, layout, painting and lint rules, used by both the CLI and the viewer
 - `src/docs/`: the guide and declarations template that `artboards docs` is built from
+- `examples/artboards/`: the project's own images and website, designed with artboards
 
 ## License
 

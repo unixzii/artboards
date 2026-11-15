@@ -31,6 +31,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.ts",
+    "build:site": "npm run -s build && node scripts/build-site.ts",
     "typecheck": "tsc --noEmit -p src/shared && tsc --noEmit && tsc --noEmit -p src/viewer",
     "check": "npm run -s typecheck && npm run -s build && node scripts/lint-examples.ts",
     "dev": "node --watch-path=src scripts/dev.ts",
