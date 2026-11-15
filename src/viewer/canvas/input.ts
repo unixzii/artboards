@@ -2,6 +2,7 @@
 //
 //   drag            pan                 wheel            pan
 //   click           select / comment    ctrl|cmd+wheel   zoom at cursor
+//   play mode: click runs onClick; drag and wheel scroll `scroll` containers
 //   two fingers     pinch zoom + pan    V C P Esc 0 !    tools, deselect, 100%, fit
 
 import type { Point } from "../core/model.ts";
@@ -57,7 +58,8 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
         dragged = true;
         stage.classList.add("panning");
       }
-      if (dragged) viewer.panBy(p.x - prev.x, p.y - prev.y);
+      // Content follows the pointer, so it scrolls the opposite way to the drag.
+      if (dragged && !viewer.scrollAt(downAt, prev.x - p.x, prev.y - p.y)) viewer.panBy(p.x - prev.x, p.y - prev.y);
     }
     pointers.set(e.pointerId, p);
   });
@@ -78,7 +80,7 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
     (e) => {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) viewer.zoomBy(Math.exp(-e.deltaY * 0.01), local(e));
-      else viewer.panBy(-e.deltaX, -e.deltaY);
+      else if (!viewer.scrollAt(local(e), e.deltaX, e.deltaY)) viewer.panBy(-e.deltaX, -e.deltaY);
     },
     false,
   );

@@ -9,7 +9,7 @@ import type { BuildPayload, Comment, ResolvedComment } from "../../shared/protoc
 import type { SceneNode } from "../../shared/scene.ts";
 import { DesignHost } from "../runtime/host.ts";
 import * as api from "./api.ts";
-import { buildModel, clickHandler, describe, EMPTY_MODEL, nodeKey, type Model, type Point, type ViewNode } from "./model.ts";
+import { buildModel, clickHandler, describe, EMPTY_MODEL, nodeKey, scrollNode, scrollTarget, toLayer, type ViewFrame, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
 
 /** select: inspect layers; comment: pin a comment to a layer; play: run the design's onClick handlers. */
@@ -38,6 +38,8 @@ export interface ViewerState {
   clickable: boolean;
   /** A short message shown over the canvas, e.g. why a click did nothing. */
   notice: string | null;
+  /** Bumped whenever a container scrolls, so overlays anchored to layers follow. */
+  scrollTick: number;
 }
 
 export interface StageElements {
@@ -49,6 +51,8 @@ export interface StageElements {
 /** Imperative stage renderer contract implemented by the CanvasKit surface. */
 export interface StageBackend {
   setModel(model: Model): void;
+  /** Repaints one artboard after something inside it moved, e.g. a scroll. */
+  refreshFrame(frame: ViewFrame): void;
   setHighlight(selected: ViewNode | null, hovered: ViewNode | null): void;
   toWorld(screen: Point): Point;
   hitTest(screen: Point): ViewNode | null;
@@ -76,6 +80,7 @@ export class Viewer {
     draft: null,
     clickable: false,
     notice: null,
+    scrollTick: 0,
   });
   private createBackend: StageBackendFactory;
   private host: DesignHost;
@@ -88,6 +93,8 @@ export class Viewer {
   private typeErrors: Diagnostic[] = [];
   private rawComments: Comment[] = [];
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Scroll offsets by layer key; viewer state only, kept across rebuilds and tools. */
+  private scrolls = new Map<string, Point>();
 
   constructor(engine: RenderEngine, createBackend: StageBackendFactory) {
     this.createBackend = createBackend;
@@ -167,7 +174,7 @@ export class Viewer {
   private syncScene() {
     const renderer = this.renderer;
     if (!renderer) return;
-    const model = buildModel(this.host.frames);
+    const model = buildModel(this.host.frames, this.scrolls);
     renderer.setModel(model);
 
     const prev = this.store.get();
@@ -290,9 +297,33 @@ export class Viewer {
     }
   }
 
-  /** Puts an artboard back in its initial state. */
+  /** Puts an artboard back in its initial state, scrolled to the start. */
   resetFrame(frame: string) {
+    for (const key of this.scrolls.keys()) if (key.startsWith(`${frame}/`)) this.scrolls.delete(key);
     void this.host.reset(frame);
+  }
+
+  /**
+   * In Play mode, scrolls the innermost scroll container under `screen` by a
+   * screen-pixel delta. Returns false when there is none, so the caller can
+   * pan the canvas instead; a container already at its end still takes the
+   * gesture, so the canvas does not jump.
+   */
+  scrollAt(screen: Point, dx: number, dy: number): boolean {
+    const renderer = this.renderer;
+    if (!renderer || this.store.get().tool !== "play") return false;
+    const a = renderer.toWorld(screen);
+    const b = renderer.toWorld({ x: screen.x + dx, y: screen.y + dy });
+    const wx = b.x - a.x;
+    const wy = b.y - a.y;
+    const target = scrollTarget(renderer.hitTest(screen), wx, wy);
+    if (!target) return false;
+    if (scrollNode(target, wx, wy)) {
+      this.scrolls.set(target.key, { ...target.scroll! });
+      renderer.refreshFrame(target.frame);
+      this.store.set({ scrollTick: this.store.get().scrollTick + 1 });
+    }
+    return true;
   }
 
   // ----------------------------------------------------------------- comments
@@ -320,7 +351,7 @@ export class Viewer {
       path: node.path,
       nodeType: node.type,
       hint: describe(node),
-      point: { x: draft.at.x - node.frame.x, y: draft.at.y - node.frame.y },
+      point: toLayer(node, { x: draft.at.x - node.frame.x, y: draft.at.y - node.frame.y }),
       text,
     });
     if (ok) this.setTool("select");

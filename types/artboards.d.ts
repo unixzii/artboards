@@ -143,6 +143,8 @@ declare module "artboards" {
     padding?: Sides;
     /** Clip children to this element's bounds. Default false. */
     clip?: boolean;
+    /** Lets reviewers scroll content that overflows this container, in the viewer's Play mode. Clips like `clip`. Needs a fixed or "fill" size along the scrolled axis; screenshots show the start of the content. */
+    scroll?: "vertical" | "horizontal" | "both";
     /** Child elements. */
     children?: ReactNode;
   }
@@ -208,6 +210,8 @@ declare module "artboards" {
     padding?: Sides;
     /** Clip children to this element's bounds. Default false. */
     clip?: boolean;
+    /** Lets reviewers scroll content that overflows this container, in the viewer's Play mode. Clips like `clip`. Needs a fixed or "fill" size along the scrolled axis; screenshots show the start of the content. */
+    scroll?: "vertical" | "horizontal" | "both";
     /** Child elements. */
     children?: ReactNode;
     /** Space between children in px. Default 0. */
@@ -283,6 +287,8 @@ declare module "artboards" {
     padding?: Sides;
     /** Clip children to this element's bounds. Default false. */
     clip?: boolean;
+    /** Lets reviewers scroll content that overflows this container, in the viewer's Play mode. Clips like `clip`. Needs a fixed or "fill" size along the scrolled axis; screenshots show the start of the content. */
+    scroll?: "vertical" | "horizontal" | "both";
     /** Child elements. */
     children?: ReactNode;
     /** Space between children in px. Default 0. */
@@ -358,6 +364,8 @@ declare module "artboards" {
     padding?: Sides;
     /** Clip children to this element's bounds. Default false. */
     clip?: boolean;
+    /** Lets reviewers scroll content that overflows this container, in the viewer's Play mode. Clips like `clip`. Needs a fixed or "fill" size along the scrolled axis; screenshots show the start of the content. */
+    scroll?: "vertical" | "horizontal" | "both";
     /** Child elements. */
     children?: ReactNode;
     /** Column count (equal widths), or one entry per column: px, `"1fr"`-style share of the free space, or `"hug"`. */

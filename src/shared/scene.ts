@@ -140,6 +140,8 @@ export interface PaintableNode {
   fontFamilies?: string[];
   /** Characters in a Text node that no bundled font covers. */
   missingGlyphs?: string[];
+  /** Viewer only: how far a `scroll` container's content is scrolled, in px. */
+  scroll?: { x: number; y: number };
 }
 
 export interface SceneNode extends PaintableNode {

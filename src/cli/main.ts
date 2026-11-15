@@ -106,7 +106,7 @@ async function main(): Promise<number> {
       return 0;
     }
     for (const c of comments) {
-      const where = c.attached ? `${c.source ?? ""}  ${c.target}` : `(layer changed since; was a <${c.nodeType}> near ${c.point.x},${c.point.y})`;
+      const where = c.attached ? `${c.source ?? ""}  ${c.target}` : `(layer changed since; was a <${c.nodeType}${c.hint ? ` ${JSON.stringify(c.hint)}` : ""}> at ${c.path || "the root"})`;
       console.log(`#${c.id}${c.resolved ? " [resolved]" : ""}  ${c.frame}  ${where}\n    ${c.text.replace(/\n/g, "\n    ")}`);
     }
     console.log(comments.length ? `${comments.length} comment(s). Mark one done with --resolve <id>.` : "No open comments.");

@@ -240,6 +240,7 @@ export function Properties() {
   const viewer = useViewer();
   const selected = useViewerState((s) => s.selected);
   useViewerState((s) => s.model); // the selected key can point at a new node after a rebuild
+  useViewerState((s) => s.scrollTick); // X/Y change when a container above scrolls
   const node = viewer.node(selected);
   return (
     <Section id="props" title="Properties">

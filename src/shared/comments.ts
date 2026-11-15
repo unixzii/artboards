@@ -12,7 +12,7 @@ export interface Comment {
   nodeType: string;
   /** The layer's text (for Text) or name when written; lets the comment follow a layer that moved. */
   hint?: string;
-  /** Where the reviewer clicked, in artboard coordinates. */
+  /** Where the reviewer clicked, in the layer's own coordinates (before rotation and scrolling). */
   point: { x: number; y: number };
   text: string;
   createdAt: string;

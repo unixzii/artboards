@@ -140,7 +140,8 @@ function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box
 
   if (p.stroke) drawBoxStroke(ck, canvas, node, box);
 
-  if (p.clip) canvas.clipRRect(outer, ck.ClipOp.Intersect, true);
+  if (p.clip || p.scroll) canvas.clipRRect(outer, ck.ClipOp.Intersect, true);
+  if (node.scroll) canvas.translate(-node.scroll.x, -node.scroll.y);
   for (const child of node.children) paintNode(engine, canvas, child);
 }
 

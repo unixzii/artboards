@@ -97,6 +97,10 @@ const effects = {
 const container = {
   padding: { type: { kind: "sides" }, doc: "Inner spacing: all | [vertical, horizontal] | [top, right, bottom, left].", default: "0" },
   clip: bool("Clip children to this element's bounds."),
+  scroll: oneOf(
+    ["vertical", "horizontal", "both"],
+    "Lets reviewers scroll content that overflows this container, in the viewer's Play mode. Clips like `clip`. Needs a fixed or \"fill\" size along the scrolled axis; screenshots show the start of the content.",
+  ),
   children: { type: { kind: "children", of: "nodes" }, doc: "Child elements." },
 } satisfies Record<string, PropDef>;
 
@@ -785,6 +789,10 @@ export function generateDocs(): string {
     "```",
     "",
     "Use `useState` for state nobody needs to review on its own, such as a toggle's pressed look.",
+    "",
+    "A long list goes in a container with `scroll=\"vertical\"` (or `\"horizontal\"`, `\"both\"`) and a fixed or",
+    "`\"fill\"` size; it clips its content, and reviewers scroll it in Play mode with the wheel or by dragging.",
+    "Scrolling is the viewer's own state: components never see it, and screenshots show the start.",
     "",
     "## Commands",
     "",

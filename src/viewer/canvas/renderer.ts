@@ -5,7 +5,7 @@
 import type { Canvas, CanvasKit, Paint, SkPicture, Surface } from "canvaskit-wasm";
 import type { RenderEngine } from "../../shared/engine.ts";
 import { paintNode } from "../../shared/paint.ts";
-import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewNode } from "../core/model.ts";
+import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewFrame, type ViewNode } from "../core/model.ts";
 import type { StageBackend, StageElements } from "../core/viewer.ts";
 
 const MIN_ZOOM = 0.02;
@@ -72,14 +72,23 @@ export class Renderer implements StageBackend {
     this.pictures.clear();
     this.model = model;
     this.selected = this.hovered = null;
-    for (const f of model.frames) {
-      if (!f.root) continue;
-      const recorder = new this.ck.PictureRecorder();
-      paintNode(this.engine, recorder.beginRecording(this.ck.LTRBRect(0, 0, f.w, f.h)), f.root);
-      this.pictures.set(f.name, recorder.finishRecordingAsPicture());
-      recorder.delete();
-    }
+    for (const f of model.frames) this.record(f);
     this.requestDraw();
+  }
+
+  refreshFrame(frame: ViewFrame) {
+    this.pictures.get(frame.name)?.delete();
+    this.pictures.delete(frame.name);
+    this.record(frame);
+    this.requestDraw();
+  }
+
+  private record(f: ViewFrame) {
+    if (!f.root) return;
+    const recorder = new this.ck.PictureRecorder();
+    paintNode(this.engine, recorder.beginRecording(this.ck.LTRBRect(0, 0, f.w, f.h)), f.root);
+    this.pictures.set(f.name, recorder.finishRecordingAsPicture());
+    recorder.delete();
   }
 
   setHighlight(selected: ViewNode | null, hovered: ViewNode | null) {

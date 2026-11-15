@@ -57,7 +57,7 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
       warn(n, "zero-size", `${label(n)} is ${width}x${height} and will not be visible — ${why}.`);
     }
 
-    if (p && p.type !== "#root" && !p.props.clip) {
+    if (p && p.type !== "#root" && !p.props.clip && !p.props.scroll) {
       const b = rotatedBounds(x, y, width, height, n.props.rotation ?? 0);
       const dx = Math.max(0, -b.x, b.x + b.w - p.layout.width);
       const dy = Math.max(0, -b.y, b.y + b.h - p.layout.height);
@@ -67,6 +67,14 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
       if ((dx > 0.5 || dy > 0.5) && (!n.props.absolute || detached)) {
         const parts = [dx > 0.5 && `${Math.round(dx)}px horizontally`, dy > 0.5 && `${Math.round(dy)}px vertically`];
         warn(n, "overflow", `${label(n)} overflows its parent ${label(p)} by ${parts.filter(Boolean).join(" and ")}.`);
+      }
+    }
+
+    if (n.props.scroll) {
+      const axes = n.props.scroll === "both" ? (["width", "height"] as const) : n.props.scroll === "horizontal" ? (["width"] as const) : (["height"] as const);
+      const hugs = axes.filter((a) => (n.props[a] ?? "hug") === "hug" && n.props[a === "width" ? "maxWidth" : "maxHeight"] == null);
+      if (hugs.length) {
+        warn(n, "scroll-hug", `${label(n)} has scroll="${n.props.scroll}" but its ${hugs.join(" and ")} hugs its content, so nothing can overflow. Give it a fixed ${hugs.join("/")}, "fill", or a max.`);
       }
     }
 

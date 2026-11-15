@@ -106,7 +106,8 @@ function HomeBody() {
   return (
     <Column width="fill" height="fill" clip align="stretch">
       <StatusBar />
-      <Column padding={[6, 20, 0, 20]} gap={16} align="stretch">
+      {/* Bottom padding keeps the last cards clear of the cart bar and tab bar. */}
+      <Column name="Feed" height="fill" scroll="vertical" padding={[6, 20, 180, 20]} gap={16} align="stretch">
         <Row align="center" justify="space-between">
           <Column gap={4}>
             <Text fontSize={22} fontWeight={700} color={color.espresso}>
@@ -155,7 +156,7 @@ function HomeBody() {
           </Row>
         </Frame>
 
-        <Row width="fill" gap={8} clip>
+        <Row width="fill" gap={8} scroll="horizontal">
           <Chip selected>推荐</Chip>
           <Chip icon="coffee">拿铁</Chip>
           <Chip>美式</Chip>
@@ -166,7 +167,7 @@ function HomeBody() {
 
         <SectionHeader title="人气推荐" action="全部 24 款" />
         <Grid columns={2} gap={12}>
-          {products.slice(0, 4).map((p, i) => (
+          {products.map((p, i) => (
             <ProductCard key={p.id} product={p} count={i === 0 ? 1 : 0} />
           ))}
         </Grid>

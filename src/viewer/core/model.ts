@@ -4,7 +4,7 @@
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
-import { layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
+import { expandSides, layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   /** "<artboard>/<path>", stable across rebuilds. */
@@ -17,6 +17,8 @@ export interface ViewNode extends PaintableNode {
   matrix: Affine;
   children: ViewNode[];
   parent: ViewNode | null;
+  /** Scroll containers only: the furthest the content can scroll on each axis (0 for an axis it does not scroll). */
+  scrollMax?: Point;
 }
 
 export interface LiveFrameInput {
@@ -102,11 +104,47 @@ const ROW_WIDTH = 6000;
 /** Placeholder size for an artboard that failed to build. */
 const FAILED = { w: 480, h: 200 };
 
-function hydrate(n: SceneNode, frame: ViewFrame, path: string, parent: ViewNode | null, nodes: Model["nodes"]): ViewNode {
+/** Sets a node's artboard position and transform from its parent's, after the parent's scroll offset. */
+function place(node: ViewNode) {
+  const parent = node.parent;
+  const sx = parent?.scroll?.x ?? 0;
+  const sy = parent?.scroll?.y ?? 0;
+  node.abs = { x: (parent?.abs.x ?? 0) - sx + node.layout.x, y: (parent?.abs.y ?? 0) - sy + node.layout.y };
+  const content = sx || sy ? multiply(parent!.matrix, [1, 0, 0, 1, -sx, -sy]) : (parent?.matrix ?? IDENTITY);
+  node.matrix = multiply(content, placement(node.layout, node.props.rotation));
+}
+
+/** How far a `scroll` container's content reaches past its box, per scrolled axis. */
+function scrollRange(n: SceneNode): Point {
+  const pad = expandSides(n.props.padding);
+  let right = 0;
+  let bottom = 0;
+  for (const c of layerChildren(n)) {
+    right = Math.max(right, c.layout.x + c.layout.width);
+    bottom = Math.max(bottom, c.layout.y + c.layout.height);
+  }
+  const axis = n.props.scroll;
+  return {
+    x: axis === "vertical" ? 0 : Math.max(0, right + pad.right - n.layout.width),
+    y: axis === "horizontal" ? 0 : Math.max(0, bottom + pad.bottom - n.layout.height),
+  };
+}
+
+const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v));
+
+function hydrate(
+  n: SceneNode,
+  frame: ViewFrame,
+  path: string,
+  parent: ViewNode | null,
+  nodes: Model["nodes"],
+  scrolls: ReadonlyMap<string, Point>,
+): ViewNode {
   // The artboard root sits at its frame's origin, whatever x/y it was given.
   const layout = parent ? n.layout : { ...n.layout, x: 0, y: 0 };
   const { children: _children, ...props } = n.props;
   if (n.type === "Text") props.children = textContentOf(n);
+  const key = nodeKey(frame.name, path);
   const node: ViewNode = {
     type: n.type,
     props,
@@ -118,19 +156,60 @@ function hydrate(n: SceneNode, frame: ViewFrame, path: string, parent: ViewNode 
     missingGlyphs: n.missingGlyphs,
     children: [],
     parent,
-    key: nodeKey(frame.name, path),
+    key,
     path,
     frame,
-    abs: { x: (parent?.abs.x ?? 0) + layout.x, y: (parent?.abs.y ?? 0) + layout.y },
-    matrix: multiply(parent?.matrix ?? IDENTITY, placement(layout, n.props.rotation)),
+    abs: { x: 0, y: 0 },
+    matrix: IDENTITY,
   };
-  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes));
+  if (props.scroll && n.type !== "Text") {
+    const max = scrollRange(n);
+    const kept = scrolls.get(key);
+    node.scrollMax = max;
+    node.scroll = { x: clamp(kept?.x ?? 0, max.x), y: clamp(kept?.y ?? 0, max.y) };
+  }
+  place(node);
+  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes, scrolls));
   nodes.set(node.key, node);
   return node;
 }
 
+/**
+ * Scrolls a container by a delta, clamped to its range, and moves everything
+ * inside it. Returns whether the offset changed.
+ */
+export function scrollNode(node: ViewNode, dx: number, dy: number): boolean {
+  const { scroll, scrollMax } = node;
+  if (!scroll || !scrollMax) return false;
+  const x = clamp(scroll.x + dx, scrollMax.x);
+  const y = clamp(scroll.y + dy, scrollMax.y);
+  if (x === scroll.x && y === scroll.y) return false;
+  node.scroll = { x, y };
+  const replace = (n: ViewNode) => {
+    for (const c of n.children) {
+      place(c);
+      replace(c);
+    }
+  };
+  replace(node);
+  return true;
+}
+
+/** The innermost scroll container at or above `node` that can still move by the delta, else the innermost one. */
+export function scrollTarget(node: ViewNode | null, dx = 0, dy = 0): ViewNode | null {
+  let first: ViewNode | null = null;
+  for (let n = node; n; n = n.parent) {
+    if (!n.scroll || !n.scrollMax) continue;
+    first ??= n;
+    const canX = dx < 0 ? n.scroll.x > 0 : dx > 0 && n.scroll.x < n.scrollMax.x;
+    const canY = dy < 0 ? n.scroll.y > 0 : dy > 0 && n.scroll.y < n.scrollMax.y;
+    if (canX || canY) return n;
+  }
+  return first;
+}
+
 /** Links live artboard trees and places artboards left to right, wrapping into rows. */
-export function buildModel(inputs: LiveFrameInput[]): Model {
+export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string, Point> = new Map()): Model {
   const nodes: Model["nodes"] = new Map();
   let x = 0;
   let y = 0;
@@ -144,7 +223,7 @@ export function buildModel(inputs: LiveFrameInput[]): Model {
       rowHeight = 0;
     }
     const frame: ViewFrame = { name: input.name, error: input.error, variants: input.variants.list(), modified: input.modified, root: null, x, y, w, h };
-    if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes);
+    if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes, scrolls);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);
     return frame;
@@ -164,9 +243,11 @@ export function bounds(frames: ViewFrame[]) {
 function hitNode(n: ViewNode, px: number, py: number): ViewNode | null {
   const { x: lx, y: ly } = toLocal(n, px, py);
   const inside = lx >= 0 && ly >= 0 && lx <= n.layout.width && ly <= n.layout.height;
-  if (n.props.clip && !inside) return null;
+  if ((n.props.clip || n.props.scroll) && !inside) return null;
+  const cx = lx + (n.scroll?.x ?? 0);
+  const cy = ly + (n.scroll?.y ?? 0);
   for (let i = n.children.length - 1; i >= 0; i--) {
-    const hit = hitNode(n.children[i], lx, ly);
+    const hit = hitNode(n.children[i], cx, cy);
     if (hit) return hit;
   }
   return inside && !n.component ? n : null;
@@ -190,20 +271,41 @@ export function hitTest(model: Model, world: Point): ViewNode | null {
   return null;
 }
 
+const apply = ([a, b, c, d, e, f]: Affine, p: Point): Point => ({ x: a * p.x + c * p.y + e, y: b * p.x + d * p.y + f });
+
+function invert([a, b, c, d, e, f]: Affine): Affine {
+  const det = a * d - b * c || 1;
+  return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
+}
+
+/** An artboard point in a layer's own (unrotated, unscrolled) coordinates. */
+export function toLayer(node: ViewNode, artboard: Point): Point {
+  return apply(invert(node.matrix), artboard);
+}
+
+/** Whether an artboard point is inside every clipping or scrolling layer above `node`. */
+function unclipped(node: ViewNode, artboard: Point): boolean {
+  for (let n = node.parent; n; n = n.parent) {
+    if (!n.props.clip && !n.props.scroll) continue;
+    const p = toLayer(n, artboard);
+    if (p.x < 0 || p.y < 0 || p.x > n.layout.width || p.y > n.layout.height) return false;
+  }
+  return true;
+}
+
 /**
- * Canvas position of a comment's pin: where the reviewer clicked while that is
- * still on the layer, the layer's centre if it has moved away.
+ * Canvas position of a comment's pin, or null when it should not show: the
+ * point is in the layer's own coordinates, so the pin follows the layer as it
+ * moves or scrolls, and is hidden while the layer is gone or scrolled out of view.
  */
 export function pinPosition(comment: ResolvedComment, model: Model): Point | null {
   const frame = model.frames.find((f) => f.name === comment.frame);
-  if (!frame) return null;
-  let { x, y } = comment.point;
   const n = comment.attached ? model.nodes.get(nodeKey(comment.frame, comment.path)) : null;
-  if (n && (x < n.abs.x || y < n.abs.y || x > n.abs.x + n.layout.width || y > n.abs.y + n.layout.height)) {
-    x = n.abs.x + n.layout.width / 2;
-    y = n.abs.y + n.layout.height / 2;
-  }
-  return { x: frame.x + x, y: frame.y + y };
+  if (!frame || !n) return null;
+  // A layer that shrank keeps the pin on its edge.
+  const at = apply(n.matrix, { x: clamp(comment.point.x, n.layout.width), y: clamp(comment.point.y, n.layout.height) });
+  if (!unclipped(n, at)) return null;
+  return { x: frame.x + at.x, y: frame.y + at.y };
 }
 
 /** The onClick of the innermost layer at or above `node` that has one. */
