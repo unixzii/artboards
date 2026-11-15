@@ -80,7 +80,7 @@ const LayerRow = memo(function LayerRow(props: {
 function walkVisible(
   node: ViewNode,
   depth: number,
-  collapsed: ReadonlySet<string>,
+  expanded: ReadonlySet<string>,
   selectedKey: string | null,
   inSelected: boolean,
   parentInComponent: boolean,
@@ -90,16 +90,16 @@ function walkVisible(
   const inComponent = parentInComponent || Boolean(node.component);
   const selectionRole: SelectionRole = isSelected ? "root" : inSelected ? "descendant" : "none";
   out.push({ node, depth, inComponent, selectionRole, selectionEdge: "none" });
-  if (!collapsed.has(node.key)) {
+  if (expanded.has(node.key)) {
     for (const child of node.children) {
-      walkVisible(child, depth + 1, collapsed, selectedKey, isSelected || inSelected, inComponent, out);
+      walkVisible(child, depth + 1, expanded, selectedKey, isSelected || inSelected, inComponent, out);
     }
   }
 }
 
-function buildRows(root: ViewNode, collapsed: ReadonlySet<string>, selectedKey: string | null): FlatRow[] {
+function buildRows(root: ViewNode, expanded: ReadonlySet<string>, selectedKey: string | null): FlatRow[] {
   const rows: FlatRow[] = [];
-  walkVisible(root, 0, collapsed, selectedKey, false, false, rows);
+  walkVisible(root, 0, expanded, selectedKey, false, false, rows);
   for (let i = 0; i < rows.length; i++) {
     const role = rows[i].selectionRole;
     if (role === "none") continue;
@@ -118,18 +118,19 @@ export function LayerTree() {
   const frames = useViewerState((s) => s.model.frames);
   const selected = useViewerState((s) => s.selected);
   const hovered = useViewerState((s) => s.hovered);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  // Everything starts collapsed. Keys are stable across rebuilds, so this survives reloads of the file.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 
-  // Selecting a layer on the canvas expands any collapsed ancestors so the row is visible.
+  // Selecting a layer expands just its ancestors, so its row shows; the layer itself stays as it was.
   useEffect(() => {
     const node = viewer.node(selected);
     if (!node) return;
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       let next: Set<string> | null = null;
       for (let p = node.parent; p; p = p.parent) {
-        if (prev.has(p.key)) {
+        if (!prev.has(p.key)) {
           next ??= new Set(prev);
-          next.delete(p.key);
+          next.add(p.key);
         }
       }
       return next ?? prev;
@@ -137,7 +138,7 @@ export function LayerTree() {
   }, [viewer, selected]);
 
   const onToggle = useCallback((key: string) => {
-    setCollapsed((prev) => {
+    setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -150,7 +151,7 @@ export function LayerTree() {
       {frames.length === 0 && <Empty>No artboards.</Empty>}
       {frames.map((frame) =>
         frame.root ? (
-          buildRows(frame.root, collapsed, selected).map((row) => (
+          buildRows(frame.root, expanded, selected).map((row) => (
             <LayerRow
               key={row.node.key}
               node={row.node}
@@ -159,7 +160,7 @@ export function LayerTree() {
               selectionRole={row.selectionRole}
               selectionEdge={row.selectionEdge}
               hovered={row.node.key === hovered}
-              collapsed={collapsed.has(row.node.key)}
+              collapsed={!expanded.has(row.node.key)}
               onToggle={onToggle}
             />
           ))
