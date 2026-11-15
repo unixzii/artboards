@@ -49,11 +49,16 @@ cannot say.
 - Gradients: `fill={{ type: "linear", angle: 135, stops: ["#f97316", "#db2777"] }}`,
   `{ type: "radial", center: [0.3, 0.2], radius: 0.8, stops: [...] }`. A stop can be `{ color, position }`.
 - A bottom sheet: `cornerRadius={[20, 20, 0, 0]}`. A bottom border only: `stroke="#e5e7eb" strokeWidth={[0, 0, 1, 0]}`.
+- Figma's inner shadow is `shadow={{ y: 1, blur: 2, color: "rgba(0,0,0,0.12)", inset: true }}`; mix drop and inset
+  shadows in one array. Text takes drop shadows only.
 
 ## Text
 
 - Mix styles in one paragraph with <Span>: `<Text fontSize={14}>¥<Span fontSize={28} fontWeight={700}>28</Span></Text>`.
 - `maxLines` truncates with an ellipsis; give the Text a width.
+- `letterSpacing` takes Figma's percentage as written: `letterSpacing="-1.1%"` (of the font size; `"-0.011em"` is the same).
+- `fontWeight` takes any number from 1 to 1000, e.g. SF Pro's 510 and 590. A variable font draws it exactly;
+  a static family uses its nearest weight.
 - Bundled families: {{fontFamilies}}. Inter and Noto Sans SC also cover characters other families lack.
 
 ## Images and fonts
@@ -71,7 +76,9 @@ const Display = defineFont("Display", [{ src: display, weight: 700 }]);
 // <Text fontFamily={Display} fontWeight={700}>Menu</Text>
 ```
 
-Images: {{imageExts}}. Fonts: {{fontExts}} (static files; a variable font renders at its default instance).
+Images: {{imageExts}}. Fonts: {{fontExts}}. A variable font is one file for every weight; it draws any
+`fontWeight` exactly and follows `fontSize` on its optical-size axis, as Figma does. For a .ttc collection, pick
+each font with `index`: `defineFont("Optima", [{ src: optima }, { src: optima, index: 1 }, { src: optima, index: 2, italic: true }])`.
 There are no remote URLs: download a file into the project first. There is no icon element: draw icons
 with <Path d="..." viewBox="0 0 24 24" />.
 

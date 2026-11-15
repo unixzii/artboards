@@ -1,17 +1,27 @@
 // Paragraph building and measurement. Platform-free: runs in Node and the browser.
 
-import type { CanvasKit, Paragraph, TypefaceFontProvider } from "canvaskit-wasm";
+import type { CanvasKit, FontWeight, Paragraph, TypefaceFontProvider } from "canvaskit-wasm";
 import { textRunsOf, type PaintableNode } from "./scene.ts";
 
 /** Family used as fallback when no font family resolved. */
 export const BASE_FAMILY = "Inter:latin";
 
+/** The weights font files usually come in. Any weight from 1 to 1000 may be asked for. */
 export const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
 
-/** Nearest weight we ship. */
-export function nearestWeight(w: unknown): number {
-  const n = Number(w) || 400;
-  return WEIGHTS.reduce((best, c) => (Math.abs(c - n) < Math.abs(best - n) ? c : best));
+/** `fontWeight` as a number in 1..1000; 400 when unset. */
+export function weightOf(w: unknown): number {
+  const n = Number(w);
+  return Number.isFinite(n) && n > 0 ? Math.min(1000, Math.max(1, Math.round(n))) : 400;
+}
+
+/** `letterSpacing` in px: a number, or `"-1.1%"` / `"-0.011em"` of the font size. */
+export function letterSpacingPx(v: unknown, fontSize: number): number {
+  if (typeof v === "number") return v;
+  if (typeof v !== "string") return 0;
+  const n = parseFloat(v);
+  if (!Number.isFinite(n)) return 0;
+  return v.trim().endsWith("%") ? (n / 100) * fontSize : v.trim().endsWith("em") ? n * fontSize : n;
 }
 
 export interface FontFace {
@@ -34,24 +44,14 @@ export interface FontResolver {
   ensure?(text: string, query: FontQuery): Promise<unknown>;
   /** Makes the glyphs for `text` available and returns the families to use, in priority order. */
   resolve(text: string, query: FontQuery): { families: string[]; missing: string[] };
+  /** Variation axes (e.g. "wght", "opsz") of the variable fonts among these families. */
+  axes?(families: string[]): ReadonlySet<string>;
 }
 
 export interface TextEngine {
   ck: CanvasKit;
   fonts: FontResolver;
 }
-
-const WEIGHT_NAMES: Record<number, string> = {
-  100: "Thin",
-  200: "ExtraLight",
-  300: "Light",
-  400: "Normal",
-  500: "Medium",
-  600: "SemiBold",
-  700: "Bold",
-  800: "ExtraBold",
-  900: "Black",
-};
 
 /** Style props a <Span> can override on its <Text>. */
 export const TEXT_STYLE_PROPS = [
@@ -73,7 +73,10 @@ function styleOf(props: Record<string, any>): RunStyle {
   return out;
 }
 
-const queryOf = (s: RunStyle): FontQuery => ({ weight: nearestWeight(s.fontWeight), italic: !!s.italic, family: s.fontFamily });
+const queryOf = (s: RunStyle): FontQuery => ({ weight: weightOf(s.fontWeight), italic: !!s.italic, family: s.fontFamily });
+
+/** A FontWeight value for CanvasKit: its enum entries are `{ value }`, and any weight works. */
+const skWeight = (w: unknown) => ({ value: weightOf(w) }) as unknown as FontWeight;
 
 /** Font queries needed by a Text node (its base line-box style and each styled run). */
 export function textQueriesOf(node: PaintableNode): { text: string; query: FontQuery }[] {
@@ -121,15 +124,24 @@ export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph
     const color = ck.parseColorString(s.color ?? "#000000");
     const decoration =
       s.textDecoration === "underline" ? ck.UnderlineDecoration : s.textDecoration === "line-through" ? ck.LineThroughDecoration : ck.NoDecoration;
+    // Variable fonts take the exact weight on their `wght` axis and the size on
+    // `opsz` (optical size, as browsers and Figma do). Only set when a variable
+    // font is in play: variations make Skia clone every typeface, even static ones.
+    const axes = families?.length ? engine.fonts.axes?.(families) : undefined;
+    const fontVariations = [
+      ...(axes?.has("wght") ? [{ axis: "wght", value: weightOf(s.fontWeight) }] : []),
+      ...(axes?.has("opsz") ? [{ axis: "opsz", value: size }] : []),
+    ];
     return {
       color,
       fontSize: size,
       fontFamilies: families?.length ? families : [BASE_FAMILY],
       fontStyle: {
-        weight: (ck.FontWeight as any)[WEIGHT_NAMES[nearestWeight(s.fontWeight)]],
+        weight: skWeight(s.fontWeight),
         slant: s.italic ? ck.FontSlant.Italic : ck.FontSlant.Upright,
       },
-      letterSpacing: s.letterSpacing ?? 0,
+      ...(fontVariations.length ? { fontVariations } : {}),
+      letterSpacing: letterSpacingPx(s.letterSpacing, size),
       decoration,
       decorationColor: color,
       decorationThickness: 1,
@@ -153,7 +165,7 @@ export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph
       forceStrutHeight: true,
       fontFamilies: (node.fontFamilies ?? [BASE_FAMILY]).slice(0, 1),
       fontSize: strutSize,
-      fontStyle: { weight: (ck.FontWeight as any)[WEIGHT_NAMES[nearestWeight(base.fontWeight)]] },
+      fontStyle: { weight: skWeight(base.fontWeight) },
       halfLeading: true,
       ...leading(strutSize),
     },

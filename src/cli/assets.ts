@@ -19,6 +19,7 @@ export const ASSET_KINDS: Record<string, AssetRef["$asset"]> = {
   ".woff2": "font",
   ".ttf": "font",
   ".otf": "font",
+  ".ttc": "font",
 };
 
 const paths = new Map<string, string>(); // id -> absolute path

@@ -62,7 +62,7 @@ export function gridTracks(v: unknown): GridTemplateComponent[] {
   if (!Array.isArray(v)) return [];
   return v.map((t): GridTemplateComponent => {
     if (typeof t === "number") return { min: t, max: t };
-    if (t === "hug") return { min: "auto", max: "auto" };
+    if (t === "hug") return { min: "auto", max: "auto" }; // sized to content; the Grid packs tracks at the start
     return { min: 0, max: t as `${number}fr` };
   });
 }
@@ -134,6 +134,10 @@ function styleFor(node: SceneNode, parent: ParentKind, stretched?: { width?: num
     s.gridTemplateColumns = gridTracks(p.columns);
     if (p.rows != null) s.gridTemplateRows = gridTracks(p.rows);
     s.gap = { width: p.columnGap ?? gap, height: p.rowGap ?? gap };
+    // Pack tracks at the start. CSS's default ("normal") hands leftover space to
+    // auto tracks, so a "hug" column or an implicit row would grow past its content.
+    s.justifyContent = JustifyContent.Start;
+    s.alignContent = AlignContent.Start;
     s.alignItems = ALIGN[(p.align ?? "stretch") as keyof typeof ALIGN];
     s.justifyItems = ALIGN[(p.justify ?? "stretch") as keyof typeof ALIGN];
   }

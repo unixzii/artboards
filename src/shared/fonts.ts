@@ -16,6 +16,7 @@ import notoMeta from "@fontsource/noto-sans-sc/metadata.json" with { type: "json
 import notoUnicode from "@fontsource/noto-sans-sc/unicode.json" with { type: "json" };
 import type { CanvasKit, Typeface, TypefaceFontProvider } from "canvaskit-wasm";
 import type { AssetRef } from "./scene.ts";
+import { extractFace, variationAxes } from "./sfnt.ts";
 import { WEIGHTS, type FontFace, type FontQuery, type FontResolver } from "./text.ts";
 
 export interface FontPack {
@@ -130,6 +131,8 @@ export interface CustomFace {
   src: AssetRef;
   weight?: number;
   italic?: boolean;
+  /** Which font of a .ttc collection. */
+  index?: number;
 }
 
 /** Families declared by the design being built, reset before each module load. */
@@ -151,7 +154,7 @@ export function knownFamilies(): string[] {
 export function declareFont(name: string, faces: CustomFace[]) {
   custom.set(
     name,
-    faces.map((f) => ({ src: f.src, weight: f.weight ?? 400, italic: f.italic ?? false })),
+    faces.map((f) => ({ src: f.src, weight: f.weight ?? 400, italic: f.italic ?? false, index: f.index ?? 0 })),
   );
 }
 
@@ -178,6 +181,8 @@ export class FontSet implements FontResolver {
   private inflight = new Map<string, Promise<ArrayBuffer | undefined>>();
   private bytes = new Map<string, ArrayBuffer | null>();
   private typefaces = new Map<string, Typeface | null>();
+  /** Variation axes of the variable fonts registered under each family name. */
+  private familyAxes = new Map<string, Set<string>>();
   /** Fallback chain per family, and which link covers each code point. */
   private chains = new Map<string, { links: Link[]; hits: Map<number, Link | null> }>();
 
@@ -192,16 +197,40 @@ export class FontSet implements FontResolver {
     return data;
   }
 
-  private registerLoaded(url: string, family: string, data: ArrayBuffer | undefined) {
-    if (!data || this.faces.has(url)) return;
-    this.faces.set(url, { family, url });
-    this.provider.registerFont(data, family);
+  /** Registers font `index` of a file (a .ttc holds several) under a family name, once. */
+  private registerLoaded(url: string, family: string, data: ArrayBuffer | undefined, index = 0) {
+    const key = index ? `${url}#${index}` : url;
+    if (!data || this.faces.has(key)) return;
+    const face = this.fontData(family, data, index);
+    this.faces.set(key, { family, url });
+    this.provider.registerFont(face, family);
+    const axes = variationAxes(face);
+    if (axes.length) {
+      const known = this.familyAxes.get(family) ?? new Set();
+      for (const a of axes) known.add(a);
+      this.familyAxes.set(family, known);
+    }
   }
 
-  private async fetchFace(url: string, family: string): Promise<ArrayBuffer | undefined> {
+  /** The bytes of one font of a file; a bad .ttc index names the family it was declared for. */
+  private fontData(family: string, data: ArrayBuffer, index: number): ArrayBuffer {
+    try {
+      return extractFace(data, index);
+    } catch (e) {
+      throw new Error(`defineFont("${family.replace(/#[^#]*$/, "")}"): ${(e as Error).message}`);
+    }
+  }
+
+  axes(families: string[]): ReadonlySet<string> {
+    const out = new Set<string>();
+    for (const f of families) for (const a of this.familyAxes.get(f) ?? []) out.add(a);
+    return out;
+  }
+
+  private async fetchFace(url: string, family: string, index = 0): Promise<ArrayBuffer | undefined> {
     if (this.bytes.has(url)) {
       const cached = this.bytes.get(url) ?? undefined;
-      this.registerLoaded(url, family, cached);
+      this.registerLoaded(url, family, cached, index);
       return cached;
     }
     let pending = this.inflight.get(url);
@@ -213,30 +242,32 @@ export class FontSet implements FontResolver {
       this.inflight.set(url, pending);
     }
     const data = await pending;
-    this.registerLoaded(url, family, data);
+    this.registerLoaded(url, family, data, index);
     return data;
   }
 
-  private syncFace(url: string, family: string): ArrayBuffer | undefined {
+  private syncFace(url: string, family: string, index = 0): ArrayBuffer | undefined {
     if (this.bytes.has(url)) {
       const cached = this.bytes.get(url) ?? undefined;
-      this.registerLoaded(url, family, cached);
+      this.registerLoaded(url, family, cached, index);
       return cached;
     }
     const res = this.load(url);
     if (isPromise(res)) return undefined;
     const data = this.storeBytes(url, res);
-    this.registerLoaded(url, family, data);
+    this.registerLoaded(url, family, data, index);
     return data;
   }
 
   private customFamilyName(name: string, faces: Required<CustomFace>[]) {
-    return `${name}#${faces.map((f) => f.src.id.slice(0, 6)).join("")}`;
+    return `${name}#${faces.map((f) => f.src.id.slice(0, 6) + (f.index ? `.${f.index}` : "")).join("")}`;
   }
 
-  private ensureTypeface(id: string, data: ArrayBuffer | undefined) {
-    if (this.typefaces.has(id)) return;
-    this.typefaces.set(id, data ? this.ck.Typeface.MakeTypefaceFromData(data) : null);
+  /** A typeface for the family's first face, to tell which characters it covers. */
+  private ensureTypeface(family: string, face: Required<CustomFace>, data: ArrayBuffer | undefined) {
+    const key = `${face.src.id}#${face.index}`;
+    if (this.typefaces.has(key)) return;
+    this.typefaces.set(key, data ? this.ck.Typeface.MakeTypefaceFromData(this.fontData(family, data, face.index)) : null);
   }
 
   /** A custom family is registered under a name tied to its files' contents. */
@@ -244,10 +275,10 @@ export class FontSet implements FontResolver {
     const faces = custom.get(name);
     if (!faces?.length) return undefined;
     const family = this.customFamilyName(name, faces);
-    for (const f of faces) this.syncFace(`/assets/${f.src.id}`, family);
-    const id = faces[0].src.id;
-    if (!this.typefaces.has(id)) this.ensureTypeface(id, this.bytes.get(`/assets/${id}`) ?? undefined);
-    const tf = this.typefaces.get(id) ?? null;
+    for (const f of faces) this.syncFace(`/assets/${f.src.id}`, family, f.index);
+    const first = faces[0];
+    this.ensureTypeface(family, first, this.bytes.get(`/assets/${first.src.id}`) ?? undefined);
+    const tf = this.typefaces.get(`${first.src.id}#${first.index}`) ?? null;
     return { family, covers: (cp) => !!tf && tf.getGlyphIDs(String.fromCodePoint(cp))[0] !== 0 };
   }
 
@@ -291,8 +322,8 @@ export class FontSet implements FontResolver {
     const faces = custom.get(wanted);
     if (faces?.length) {
       const regFamily = this.customFamilyName(wanted, faces);
-      const loaded = await Promise.all(faces.map((f) => this.fetchFace(`/assets/${f.src.id}`, regFamily)));
-      this.ensureTypeface(faces[0].src.id, loaded[0]);
+      const loaded = await Promise.all(faces.map((f) => this.fetchFace(`/assets/${f.src.id}`, regFamily, f.index)));
+      this.ensureTypeface(regFamily, faces[0], loaded[0]);
     }
     const { ordered } = this.selectLinks(text, wanted);
     await Promise.all(

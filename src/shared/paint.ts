@@ -61,7 +61,7 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   } else if (node.type === "Text") {
     const para = paragraphFor(engine, node);
     layoutParagraph(para, w);
-    const shadows = normalizeShadows(p.shadow);
+    const shadows = normalizeShadows(p.shadow).drop;
     const draw = () => canvas.drawParagraph(para, 0, 0);
     if (shadows.length > 0 && w > 0 && h > 0) drawFilteredShadows(ck, canvas, shadows, draw);
     draw();
@@ -136,7 +136,7 @@ function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box
   const outer = box.rrect(ck, ZERO);
 
   const shadows = normalizeShadows(p.shadow);
-  if (shadows.length > 0 && w > 0 && h > 0) drawBoxShadows(ck, canvas, box, shadows);
+  if (shadows.drop.length > 0 && w > 0 && h > 0) drawBoxShadows(ck, canvas, box, shadows.drop);
 
   const isImage = node.type === "Image";
   const img = isImage && p.src ? engine.images.get(p.src.id) : null;
@@ -149,6 +149,8 @@ function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box
     else drawPlaceholder(ck, canvas, w, h);
     canvas.restore();
   }
+  // Like CSS's inset box-shadow: over the fill and image, under the border and children.
+  if (shadows.inset.length > 0 && w > 0 && h > 0) drawBoxInsetShadows(ck, canvas, box, shadows.inset);
 
   if (p.stroke) drawBoxStroke(ck, canvas, node, box);
 
@@ -252,6 +254,63 @@ function drawBoxShadows(ck: CanvasKit, canvas: Canvas, box: BoxGeometry, shadows
   canvas.restore();
 }
 
+/**
+ * Inner shadows: the area outside the shape, offset and blurred, seen through
+ * the shape. `spread` shrinks the hole, so the shadow reaches further in.
+ */
+function drawBoxInsetShadows(ck: CanvasKit, canvas: Canvas, box: BoxGeometry, shadows: Required<Shadow>[]) {
+  canvas.save();
+  canvas.clipRRect(box.rrect(ck, ZERO), ck.ClipOp.Intersect, true);
+  for (const s of shadows) {
+    // Far enough out that the blur never shows the outer edge.
+    const pad = Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.spread) + s.blur * 2 + 1;
+    const around = ck.RRectXY(ck.LTRBRect(-pad, -pad, box.w + pad, box.h + pad), 0, 0);
+    const hole = box.rrect(ck, uniform(s.spread), s.x, s.y);
+    const mask = s.blur > 0 ? ck.MaskFilter.MakeBlur(ck.BlurStyle.Normal, s.blur / 2, true) : null;
+    withPaint(ck, s.color, box.w, box.h, (paint) => {
+      if (mask) paint.setMaskFilter(mask);
+      if (hole[2] > hole[0] && hole[3] > hole[1]) canvas.drawDRRect(around, hole, paint);
+      else canvas.drawRRect(around, paint); // spread closed the hole: the whole shape is in shadow
+    });
+    mask?.delete();
+  }
+  canvas.restore();
+}
+
+/**
+ * Inner shadows for a path: everything outside the offset path, grown by
+ * `spread` and blurred, then masked to the path itself.
+ */
+function drawPathInsetShadows(ck: CanvasKit, canvas: Canvas, path: Path, shadows: Required<Shadow>[]) {
+  const [l, t, r, b] = path.getBounds();
+  for (const s of shadows) {
+    // Far enough out that the blur never shows the edge of the layer.
+    const pad = Math.abs(s.x) + Math.abs(s.y) + Math.abs(s.spread) + s.blur * 2 + 1;
+    const bounds = ck.LTRBRect(l - pad, t - pad, r + pad, b + pad);
+    const morph = s.spread > 0 ? ck.ImageFilter.MakeDilate(s.spread, s.spread, null) : s.spread < 0 ? ck.ImageFilter.MakeErode(-s.spread, -s.spread, null) : null;
+    const filter = s.blur > 0 ? ck.ImageFilter.MakeBlur(s.blur / 2, s.blur / 2, ck.TileMode.Clamp, morph) : morph;
+    const blurred = new ck.Paint();
+    if (filter) blurred.setImageFilter(filter);
+
+    canvas.saveLayer(undefined, bounds); // the shadow, kept only inside the path at the end
+    canvas.saveLayer(blurred, bounds);
+    canvas.translate(s.x, s.y);
+    canvas.clipPath(path, ck.ClipOp.Difference, true);
+    canvas.drawColor(ck.parseColorString(s.color));
+    canvas.restore();
+    // Keep it only inside the path. (A DstIn draw would only touch pixels the path covers.)
+    canvas.save();
+    canvas.clipPath(path, ck.ClipOp.Difference, true);
+    canvas.drawColor(ck.TRANSPARENT, ck.BlendMode.Clear);
+    canvas.restore();
+    canvas.restore();
+
+    blurred.delete();
+    filter?.delete();
+    if (filter !== morph) morph?.delete();
+  }
+}
+
 // ------------------------------------------------------------------ paths
 
 function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode) {
@@ -265,19 +324,21 @@ function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode) {
       backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipPath(path, op, true));
     }
 
-    const shadows = normalizeShadows(p.shadow);
+    const { drop, inset } = normalizeShadows(p.shadow);
     const draw = () => drawPathFillAndStroke(ck, canvas, path, p, w, h);
-    if (shadows.length > 0 && (p.fill || p.stroke)) {
+    if (drop.length > 0 && (p.fill || p.stroke)) {
       if (p.fill && !p.stroke) {
         canvas.save();
         canvas.clipPath(path, ck.ClipOp.Difference, true);
-        drawFilteredShadows(ck, canvas, shadows, draw);
+        drawFilteredShadows(ck, canvas, drop, draw);
         canvas.restore();
       } else {
-        drawFilteredShadows(ck, canvas, shadows, draw);
+        drawFilteredShadows(ck, canvas, drop, draw);
       }
     }
-    draw();
+    drawPathFillAndStroke(ck, canvas, path, p, w, h, () => {
+      if (inset.length > 0 && p.fill) drawPathInsetShadows(ck, canvas, path, inset);
+    });
   } finally {
     path.delete();
   }
@@ -315,10 +376,12 @@ function buildRenderPath(ck: CanvasKit, node: PaintableNode): Path | null {
   return pb.detachAndDelete();
 }
 
-function drawPathFillAndStroke(ck: CanvasKit, canvas: Canvas, path: Path, p: Record<string, any>, w: number, h: number) {
+/** `betweenFillAndStroke` paints inner shadows, which go over the fill and under the stroke. */
+function drawPathFillAndStroke(ck: CanvasKit, canvas: Canvas, path: Path, p: Record<string, any>, w: number, h: number, betweenFillAndStroke?: () => void) {
   if (p.fill) {
     withPaint(ck, p.fill, w, h, (paint) => canvas.drawPath(path, paint));
   }
+  betweenFillAndStroke?.();
   if (p.stroke) {
     const caps = {
       butt: ck.StrokeCap.Butt,
@@ -346,16 +409,17 @@ function drawPathFillAndStroke(ck: CanvasKit, canvas: Canvas, path: Path, p: Rec
 
 // ------------------------------------------------------------------ effects
 
-function normalizeShadows(raw: Shadow | Shadow[] | undefined): Required<Shadow>[] {
-  if (!raw) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.map((s) => ({
+/** Drop shadows (behind the shape) and inset ones (inside it), each in the order given. */
+function normalizeShadows(raw: Shadow | Shadow[] | undefined): { drop: Required<Shadow>[]; inset: Required<Shadow>[] } {
+  const list = (raw ? (Array.isArray(raw) ? raw : [raw]) : []).map((s) => ({
     x: s.x ?? 0,
     y: s.y ?? 0,
     blur: s.blur ?? 0,
     spread: s.spread ?? 0,
     color: s.color ?? DEFAULT_SHADOW_COLOR,
+    inset: s.inset ?? false,
   }));
+  return { drop: list.filter((s) => !s.inset), inset: list.filter((s) => s.inset) };
 }
 
 /** `strokeDash` -> an even-length interval list, or null for a solid line. */

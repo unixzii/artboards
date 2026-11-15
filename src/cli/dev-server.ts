@@ -23,6 +23,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
   ".otf": "font/otf",
+  ".ttc": "font/collection",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -154,7 +155,7 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
   watch(dirname(file), { recursive: true }, (_event, name) => {
     if (!name || name.includes("node_modules")) return;
     const isComments = basename(name) === commentsFile;
-    const isSource = /\.(jsx|tsx|ts|js|png|jpe?g|webp|gif|woff2|ttf|otf)$/i.test(name);
+    const isSource = /\.(jsx|tsx|ts|js|png|jpe?g|webp|gif|woff2|ttf|otf|ttc)$/i.test(name);
     if (!isComments && !isSource) return;
     if (isSource) pendingCommentsOnly = false;
     clearTimeout(timer);

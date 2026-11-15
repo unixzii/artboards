@@ -34,6 +34,7 @@ declare module "artboards" {
   /** A grid track: px, a `"1fr"`-style share of the free space, or `"hug"` (fit content). */
   export type Track = number | `${number}fr` | "hug";
 {{enums}}
+  /** A drop shadow, behind the shape. */
   export interface Shadow {
     /** Horizontal offset in px. Default 0. */
     x?: number;
@@ -45,7 +46,17 @@ declare module "artboards" {
     spread?: number;
     /** Shadow color. Default "rgba(0, 0, 0, 0.25)". */
     color?: Color;
+    /** `true` makes it an InnerShadow. */
+    inset?: false;
   }
+  /** Figma's inner shadow: inside the shape, over the fill and under the border. `spread` reaches further in. */
+  export interface InnerShadow extends Omit<Shadow, "inset"> {
+    inset: true;
+  }
+  /** px, or relative to the font size: `"-1.1%"` (Figma's unit) or `"-0.011em"`. */
+  export type LetterSpacing = number | `${number}%` | `${number}em`;
+  /** Any weight from 1 to 1000; the named ones are 400 regular, 500 medium, 600 semibold, 700 bold. */
+  export type FontWeight = 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | (number & {});
   /** `[minX, minY, width, height]` or `"minX minY width height"`. */
   export type ViewBox = string | [number, number, number, number];
   export type TextContent = string | number | null | undefined | false;
@@ -61,10 +72,13 @@ declare module "artboards" {
     weight?: FontWeight;
     /** Whether this file is the italic style. Default false. */
     italic?: boolean;
+    /** Which font of a .ttc collection, counting from 0 (e.g. Optima.ttc: 0 regular, 1 bold, ...). Default 0. */
+    index?: number;
   }
   /**
    * Declares a font family from imported files and returns its name for `fontFamily`.
-   * Characters the files lack fall back to the bundled fonts.
+   * Characters the files lack fall back to the bundled fonts. A variable font
+   * renders any `fontWeight` exactly, and its optical size follows `fontSize`.
    * @example
    * import regular from "./fonts/Brand-Regular.woff2";
    * import bold from "./fonts/Brand-Bold.woff2";

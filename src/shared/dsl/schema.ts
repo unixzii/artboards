@@ -2,7 +2,7 @@
 // and the element part of the generated d.ts (see src/docs/generate.ts) come from here.
 
 import { knownFamilies } from "../fonts.ts";
-import { isAssetRef, parseViewBox } from "../scene.ts";
+import { isAssetRef, parseViewBox, type Shadow } from "../scene.ts";
 
 type PropType =
   | { kind: "number"; min?: number; max?: number; integer?: boolean }
@@ -17,7 +17,10 @@ type PropType =
   | { kind: "tracks" }
   | { kind: "image" }
   | { kind: "fontFamily" }
-  | { kind: "shadow" }
+  /** `inset: false`: drop shadows only (text). */
+  | { kind: "shadow"; inset?: false }
+  | { kind: "letterSpacing" }
+  | { kind: "fontWeight" }
   | { kind: "viewBox" }
   | { kind: "handler" }
   | { kind: "enum"; values: readonly string[] }
@@ -41,7 +44,6 @@ const oneOf = (values: readonly string[], doc: string, def?: string): PropDef =>
 });
 
 const ALIGN = ["start", "center", "end", "stretch"] as const;
-const WEIGHTS = ["100", "200", "300", "400", "500", "600", "700", "800", "900"] as const;
 
 const box = {
   width: { type: { kind: "size" }, doc: "Width.", default: '"hug"' },
@@ -70,7 +72,7 @@ const box = {
 
 const shadowProp: PropDef = {
   type: { kind: "shadow" },
-  doc: "One drop shadow or several.",
+  doc: "One shadow or several: drop shadows behind the shape, `inset: true` ones inside it.",
 };
 
 const paint = {
@@ -112,10 +114,18 @@ const flex = {
 const textStyle = {
   color: color("Text color. Default #000000."),
   fontSize: num("Font size in px.", "14", 1),
-  fontWeight: oneOf(WEIGHTS, "Font weight.", "400"),
+  fontWeight: {
+    type: { kind: "fontWeight" },
+    doc: "Weight from 1 to 1000 (400 regular, 700 bold). A variable font draws it exactly; other fonts use their nearest weight.",
+    default: "400",
+  },
   fontFamily: { type: { kind: "fontFamily" }, doc: "A bundled family or one declared with `defineFont`.", default: '"Inter"' },
   italic: bool("Italic style; slanted synthetically where a font has no italic (e.g. CJK)."),
-  letterSpacing: { type: { kind: "number", min: -Infinity }, doc: "Extra space between characters in px.", default: "0" },
+  letterSpacing: {
+    type: { kind: "letterSpacing" },
+    doc: 'Extra space between characters: px, or relative to the font size as `"-1.1%"` (Figma\'s unit) or `"-0.011em"`.',
+    default: "0",
+  },
   textDecoration: oneOf(["none", "underline", "line-through"], "Line drawn with the text.", '"none"'),
   tabularNums: bool("Equal-width digits, so numbers line up in columns."),
 } satisfies Record<string, PropDef>;
@@ -158,7 +168,7 @@ export const ELEMENTS: Record<string, ElementDef> = {
     {
       columns: {
         type: { kind: "tracks" },
-        doc: 'Column count (equal widths), or one entry per column: px, `"1fr"`-style share of the free space, or `"hug"`.',
+        doc: 'Column count (equal widths), or one entry per column: px, `"1fr"`-style share of the free space, or `"hug"` (as wide as its widest cell).',
         required: true,
       },
       rows: { type: { kind: "tracks" }, doc: "Row tracks, same forms as `columns`. Rows hug their content by default." },
@@ -176,7 +186,7 @@ export const ELEMENTS: Record<string, ElementDef> = {
       lineHeight: num("Line height in px. Defaults to the font's natural line height (about 1.2x fontSize).", undefined, 1),
       textAlign: oneOf(["left", "center", "right"], "Horizontal alignment of lines within the text box.", '"left"'),
       maxLines: int("Cut the text after this many lines and end it with an ellipsis."),
-      shadow: shadowProp,
+      shadow: { type: { kind: "shadow", inset: false }, doc: "One drop shadow or several, behind the glyphs." },
       children: { type: { kind: "children", of: "runs" }, doc: "The text: strings, numbers and <Span> elements." },
     },
   ),
@@ -216,7 +226,6 @@ export const ELEMENTS: Record<string, ElementDef> = {
 };
 
 // fontWeight is written as a number in JSX.
-const NUMERIC_ENUMS = new Set(["fontWeight"]);
 
 // Props an agent is likely to reach for, mapped to what we actually support.
 export const HINTS: Record<string, string> = {
@@ -263,7 +272,7 @@ export const HINTS: Record<string, string> = {
   fontStyle: "use `italic`",
   textDecorationLine: "use `textDecoration`",
   fontVariantNumeric: "use `tabularNums`",
-  tracking: "use `letterSpacing` (px)",
+  tracking: 'use `letterSpacing` (px, or `"-1.1%"` of the font size)',
   objectFit: "use `fit`",
   resizeMode: "use `fit`",
   source: "use `src` with an imported file",
@@ -317,7 +326,8 @@ export function unknownExport(name: string): DslError {
 
 const INTERNAL = new Set(["key", "ref", "$source"]);
 const COLOR = /^(#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})|rgba?\([^)]+\))$/i;
-const SHADOW_KEYS = new Set(["x", "y", "blur", "spread", "color"]);
+const SHADOW_KEYS = new Set(["x", "y", "blur", "spread", "color", "inset"]);
+const LETTER_SPACING = /^-?(\d+(\.\d*)?|\.\d+)(%|em)$/;
 const FR = /^\d+(\.\d+)?fr$/;
 
 const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
@@ -334,6 +344,7 @@ function isShadowObject(v: unknown): boolean {
   if (obj.blur != null && (!isNum(obj.blur) || obj.blur < 0)) return false;
   if (obj.spread != null && !isNum(obj.spread)) return false;
   if (obj.color != null && !isColor(obj.color)) return false;
+  if (obj.inset != null && typeof obj.inset !== "boolean") return false;
   return true;
 }
 
@@ -391,13 +402,19 @@ function describe(t: PropType, prop: string): string {
     case "fontFamily":
       return `one of ${knownFamilies().map((f) => JSON.stringify(f)).join(", ")} (declare others with \`defineFont\`)`;
     case "shadow":
-      return 'a shadow `{ x?, y?, blur?, spread?, color? }` or array of shadows';
+      return t.inset === false
+        ? "a shadow `{ x?, y?, blur?, spread?, color? }` or array of shadows (text has no inset shadows)"
+        : "a shadow `{ x?, y?, blur?, spread?, color?, inset? }` or array of shadows";
+    case "letterSpacing":
+      return 'a number of px, or a string relative to the font size such as "-1.1%" or "-0.011em"';
+    case "fontWeight":
+      return "a number from 1 to 1000 (400 regular, 700 bold)";
     case "handler":
       return "a function";
     case "viewBox":
       return '`[minX, minY, width, height]` or `"minX minY width height"` with positive width and height';
     case "enum":
-      return `one of ${t.values.map((v) => (NUMERIC_ENUMS.has(prop) ? v : JSON.stringify(v))).join(", ")}`;
+      return `one of ${t.values.map((v) => JSON.stringify(v)).join(", ")}`;
     case "children":
       return t.of === "text" ? "strings or numbers" : t.of === "runs" ? "strings, numbers or <Span> elements" : "elements";
   }
@@ -432,14 +449,20 @@ function matches(t: PropType, v: unknown, prop: string): boolean {
       return isAssetRef(v) && v.$asset === "image";
     case "fontFamily":
       return typeof v === "string" && knownFamilies().includes(v);
-    case "shadow":
-      return isShadowObject(v) || (Array.isArray(v) && v.every(isShadowObject));
+    case "shadow": {
+      const ok = (s: unknown) => isShadowObject(s) && !(t.inset === false && (s as Shadow).inset);
+      return ok(v) || (Array.isArray(v) && v.every(ok));
+    }
+    case "letterSpacing":
+      return isNum(v) || (typeof v === "string" && LETTER_SPACING.test(v.trim()));
+    case "fontWeight":
+      return isNum(v) && v >= 1 && v <= 1000;
     case "viewBox":
       return parseViewBox(v) !== null;
     case "handler":
       return typeof v === "function";
     case "enum":
-      return t.values.includes(NUMERIC_ENUMS.has(prop) ? String(v) : (v as string)) && (NUMERIC_ENUMS.has(prop) || typeof v === "string");
+      return typeof v === "string" && t.values.includes(v);
     case "children":
       return true; // structure is enforced by the reconciler
   }
@@ -485,7 +508,6 @@ export function validateProps(type: string, props: Record<string, any>) {
 /** Enums the .d.ts names once instead of spelling out at every prop. */
 const ENUM_ALIASES = new Map<readonly string[], string>([
   [ALIGN, "Align"],
-  [WEIGHTS, "FontWeight"],
 ]);
 
 function tsType(t: PropType, prop: string): string {
@@ -516,13 +538,17 @@ function tsType(t: PropType, prop: string): string {
     case "fontFamily":
       return "FontFamily";
     case "shadow":
-      return "Shadow | Shadow[]";
+      return t.inset === false ? "Shadow | Shadow[]" : "Shadow | InnerShadow | (Shadow | InnerShadow)[]";
+    case "letterSpacing":
+      return "LetterSpacing";
+    case "fontWeight":
+      return "FontWeight";
     case "viewBox":
       return "ViewBox";
     case "handler":
       return "() => void";
     case "enum":
-      return t.values.map((v) => (NUMERIC_ENUMS.has(prop) ? v : JSON.stringify(v))).join(" | ");
+      return t.values.map((v) => JSON.stringify(v)).join(" | ");
     case "children":
       return t.of === "text" ? "TextContent | TextContent[]" : "ReactNode";
   }
@@ -531,7 +557,7 @@ function tsType(t: PropType, prop: string): string {
 /** The named enums, as declarations inside `declare module "artboards"`. */
 export function enumDeclarations(): string {
   return [...ENUM_ALIASES]
-    .map(([values, name]) => `  export type ${name} = ${values.map((v) => (values === WEIGHTS ? v : JSON.stringify(v))).join(" | ")};`)
+    .map(([values, name]) => `  export type ${name} = ${values.map((v) => JSON.stringify(v)).join(" | ")};`)
     .join("\n");
 }
 

@@ -15,6 +15,8 @@ export interface Shadow {
   blur?: number;
   spread?: number;
   color?: string;
+  /** Drawn inside the shape (an inner shadow) instead of behind it. */
+  inset?: boolean;
 }
 
 export type ViewBox = string | [number, number, number, number];
