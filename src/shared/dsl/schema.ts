@@ -1,7 +1,7 @@
-// Single source of truth for the DSL: runtime validation, the generated
-// `types/artboards.d.ts`, and the `artboards docs` reference all come from here.
+// Single source of truth for the DSL's elements and props: runtime validation
+// and the element part of `types/artboards.d.ts` (see src/cli/docs.ts) come from here.
 
-import { builtinFamilies, knownFamilies } from "../fonts.ts";
+import { knownFamilies } from "../fonts.ts";
 import { isAssetRef, parseViewBox } from "../scene.ts";
 
 type PropType =
@@ -40,15 +40,18 @@ const oneOf = (values: readonly string[], doc: string, def?: string): PropDef =>
   default: def,
 });
 
+const ALIGN = ["start", "center", "end", "stretch"] as const;
+const WEIGHTS = ["100", "200", "300", "400", "500", "600", "700", "800", "900"] as const;
+
 const box = {
-  width: { type: { kind: "size" }, doc: "Fixed px, \"fill\" (take available space) or \"hug\" (fit content).", default: '"hug"' },
-  height: { type: { kind: "size" }, doc: "Fixed px, \"fill\" or \"hug\".", default: '"hug"' },
+  width: { type: { kind: "size" }, doc: "Width.", default: '"hug"' },
+  height: { type: { kind: "size" }, doc: "Height.", default: '"hug"' },
   minWidth: num("Lower bound on the width in px."),
   maxWidth: num("Upper bound on the width in px."),
   minHeight: num("Lower bound on the height in px."),
   maxHeight: num("Upper bound on the height in px."),
   grow: num('Share of the free space a `"fill"` child takes along its Row/Column, relative to its fill siblings.', "1"),
-  alignSelf: oneOf(["start", "center", "end", "stretch"], "Overrides the parent's `align` for this child."),
+  alignSelf: oneOf(ALIGN, "Overrides the parent's `align` for this child."),
   absolute: bool("Take this child out of its Row/Column/Grid flow and place it with x/y/right/bottom, on top of the flow."),
   x: { type: { kind: "number", min: -Infinity }, doc: "Left offset in px from the parent's left edge. Applies inside a <Frame> or with `absolute`.", default: "0" },
   y: { type: { kind: "number", min: -Infinity }, doc: "Top offset in px from the parent's top edge. Applies inside a <Frame> or with `absolute`.", default: "0" },
@@ -65,37 +68,27 @@ const box = {
   },
 } satisfies Record<string, PropDef>;
 
-const fillProp: PropDef = { type: { kind: "fill" }, doc: "Background: a color or a gradient `{ type: \"linear\" | \"radial\", stops, ... }`." };
-const strokeProp: PropDef = { type: { kind: "fill" }, doc: "Border color or gradient." };
-const strokeDash: PropDef = {
-  type: { kind: "dash" },
-  doc: "Dashed border: dash length, or `[dash, gap, ...]` in px. Needs a single strokeWidth.",
-};
-
-const boxPaint = {
-  fill: fillProp,
-  stroke: strokeProp,
-  strokeWidth: { type: { kind: "sides" }, doc: "Border width in px: all | [vertical, horizontal] | [top, right, bottom, left].", default: "1" },
-  strokeAlign: oneOf(["inside", "center", "outside"], "Where the border sits relative to the edge.", '"center"'),
-  strokeDash,
-} satisfies Record<string, PropDef>;
-
-const radius = {
-  cornerRadius: { type: { kind: "corners" }, doc: "Corner radius in px: all | [topLeft, topRight, bottomRight, bottomLeft].", default: "0" },
-} satisfies Record<string, PropDef>;
-
 const shadowProp: PropDef = {
   type: { kind: "shadow" },
-  doc: "Drop shadow or array of shadows: `{ x?, y?, blur?, spread?, color? }`.",
+  doc: "One drop shadow or several.",
 };
 
-const effects = {
+const paint = {
+  fill: { type: { kind: "fill" }, doc: "Background (or shape) color or gradient." },
+  stroke: { type: { kind: "fill" }, doc: "Border color or gradient." },
+  strokeDash: { type: { kind: "dash" }, doc: "Dashed border: dash length, or `[dash, gap, ...]` in px. Needs a single strokeWidth." },
   shadow: shadowProp,
   backdropBlur: num("Frosted-glass blur radius in px applied to content behind this element.", "0"),
 } satisfies Record<string, PropDef>;
 
+const border = {
+  strokeWidth: { type: { kind: "sides" }, doc: "Border width in px, per side.", default: "1" },
+  strokeAlign: oneOf(["inside", "center", "outside"], "Where the border sits relative to the edge.", '"center"'),
+  cornerRadius: { type: { kind: "corners" }, doc: "Corner radius in px, per corner.", default: "0" },
+} satisfies Record<string, PropDef>;
+
 const container = {
-  padding: { type: { kind: "sides" }, doc: "Inner spacing: all | [vertical, horizontal] | [top, right, bottom, left].", default: "0" },
+  padding: { type: { kind: "sides" }, doc: "Inner spacing in px, per side.", default: "0" },
   clip: bool("Clip children to this element's bounds."),
   scroll: oneOf(
     ["vertical", "horizontal", "both"],
@@ -106,7 +99,7 @@ const container = {
 
 const flex = {
   gap: num("Space between children in px.", "0"),
-  align: oneOf(["start", "center", "end", "stretch"], "Cross-axis alignment of children.", '"start"'),
+  align: oneOf(ALIGN, "Cross-axis alignment of children.", '"start"'),
   justify: oneOf(
     ["start", "center", "end", "space-between", "space-around", "space-evenly"],
     "Main-axis distribution of children.",
@@ -119,7 +112,7 @@ const flex = {
 const textStyle = {
   color: color("Text color. Default #000000."),
   fontSize: num("Font size in px.", "14", 1),
-  fontWeight: oneOf(["100", "200", "300", "400", "500", "600", "700", "800", "900"], "Font weight.", "400"),
+  fontWeight: oneOf(WEIGHTS, "Font weight.", "400"),
   fontFamily: { type: { kind: "fontFamily" }, doc: "A bundled family or one declared with `defineFont`.", default: '"Inter"' },
   italic: bool("Italic style; slanted synthetically where a font has no italic (e.g. CJK)."),
   letterSpacing: { type: { kind: "number", min: -Infinity }, doc: "Extra space between characters in px.", default: "0" },
@@ -127,32 +120,42 @@ const textStyle = {
   tabularNums: bool("Equal-width digits, so numbers line up in columns."),
 } satisfies Record<string, PropDef>;
 
+/** Prop sets shared by several elements; the .d.ts declares each once as `<Name>Props`. */
+const GROUPS = {
+  Layer: { doc: "Props every element but <Span> takes: size, placement, opacity, rotation, name and onClick.", props: box },
+  Paint: { doc: "Fill, border paint and effects of a shape.", props: paint },
+  Border: { doc: "Border geometry of a rectangular box.", props: border },
+  Container: { doc: "Props of an element that holds child elements.", props: container },
+  Flex: { doc: "How a <Row> or <Column> arranges its children.", props: flex },
+  TextStyle: { doc: "Character style shared by <Text> and <Span>.", props: textStyle },
+} satisfies Record<string, { doc: string; props: Record<string, PropDef> }>;
+
+type GroupName = keyof typeof GROUPS;
+
 interface ElementDef {
   doc: string;
+  groups: GroupName[];
+  /** Props only this element takes. */
+  own: Record<string, PropDef>;
+  /** Every prop it accepts: its groups' and its own. */
   props: Record<string, PropDef>;
 }
 
+function element(doc: string, groups: GroupName[], own: Record<string, PropDef> = {}): ElementDef {
+  return { doc, groups, own, props: Object.assign({}, ...groups.map((g) => GROUPS[g].props), own) };
+}
+
 export const ELEMENTS: Record<string, ElementDef> = {
-  Frame: {
-    doc: "Free-form container. Children are positioned absolutely with x/y/right/bottom. Use as the artboard root (fixed width/height).",
-    props: { ...box, ...boxPaint, ...radius, ...effects, ...container },
-  },
-  Row: {
-    doc: "Lays children out left to right.",
-    props: { ...box, ...boxPaint, ...radius, ...effects, ...container, ...flex },
-  },
-  Column: {
-    doc: "Lays children out top to bottom.",
-    props: { ...box, ...boxPaint, ...radius, ...effects, ...container, ...flex },
-  },
-  Grid: {
-    doc: 'Lays children out in cells, left to right then top to bottom. Children stretch to fill their cell unless sized; use `colSpan`/`rowSpan` to span cells.',
-    props: {
-      ...box,
-      ...boxPaint,
-      ...radius,
-      ...effects,
-      ...container,
+  Frame: element(
+    "Free-form container. Children are positioned absolutely with x/y/right/bottom. Use as the artboard root (fixed width/height).",
+    ["Layer", "Paint", "Border", "Container"],
+  ),
+  Row: element("Lays children out left to right.", ["Layer", "Paint", "Border", "Container", "Flex"]),
+  Column: element("Lays children out top to bottom.", ["Layer", "Paint", "Border", "Container", "Flex"]),
+  Grid: element(
+    "Lays children out in cells, left to right then top to bottom. Children stretch to fill their cell unless sized; use `colSpan`/`rowSpan` to span cells.",
+    ["Layer", "Paint", "Border", "Container"],
+    {
       columns: {
         type: { kind: "tracks" },
         doc: 'Column count (equal widths), or one entry per column: px, `"1fr"`-style share of the free space, or `"hug"`.',
@@ -162,83 +165,61 @@ export const ELEMENTS: Record<string, ElementDef> = {
       gap: num("Space between cells in px.", "0"),
       columnGap: num("Space between columns in px. Defaults to `gap`."),
       rowGap: num("Space between rows in px. Defaults to `gap`."),
-      align: oneOf(["start", "center", "end", "stretch"], "Vertical alignment of children within their cells.", '"stretch"'),
-      justify: oneOf(["start", "center", "end", "stretch"], "Horizontal alignment of children within their cells.", '"stretch"'),
+      align: oneOf(ALIGN, "Vertical alignment of children within their cells.", '"stretch"'),
+      justify: oneOf(ALIGN, "Horizontal alignment of children within their cells.", '"stretch"'),
     },
-  },
-  Text: {
-    doc: 'Text. Hugs its content on one line by default; set width (px or "fill") to make it wrap. Children are strings, numbers and <Span>s.',
-    props: {
-      ...box,
-      ...textStyle,
+  ),
+  Text: element(
+    'Text. Hugs its content on one line by default; set width (px or "fill") to make it wrap. Children are strings, numbers and <Span>s.',
+    ["Layer", "TextStyle"],
+    {
       lineHeight: num("Line height in px. Defaults to the font's natural line height (about 1.2x fontSize).", undefined, 1),
       textAlign: oneOf(["left", "center", "right"], "Horizontal alignment of lines within the text box.", '"left"'),
       maxLines: int("Cut the text after this many lines and end it with an ellipsis."),
       shadow: shadowProp,
       children: { type: { kind: "children", of: "runs" }, doc: "The text: strings, numbers and <Span> elements." },
     },
-  },
-  Span: {
-    doc: "A styled run inside a <Text>, e.g. `<Text>Total <Span fontWeight={700}>¥28</Span></Text>`. Inherits the Text's style and overrides what it sets. Not a layer: it has no box.",
-    props: {
-      ...textStyle,
-      children: { type: { kind: "children", of: "text" }, doc: "The text: strings and numbers only." },
-    },
-  },
-  Rect: {
-    doc: "Rectangle. Has no content, so give it a size.",
-    props: { ...box, ...boxPaint, ...radius, ...effects },
-  },
-  Ellipse: {
-    doc: "Ellipse inscribed in its box. Equal width and height make a circle.",
-    props: {
-      ...box,
-      fill: fillProp,
-      stroke: strokeProp,
-      strokeWidth: num("Border width in px.", "1"),
-      strokeAlign: boxPaint.strokeAlign,
-      strokeDash,
-      ...effects,
-    },
-  },
-  Image: {
-    doc: 'Bitmap image imported from a file: `import photo from "./photo.jpg"` then `<Image src={photo} width={120} />`. Keeps its aspect ratio when only one side is set. Without `src` it draws a placeholder.',
-    props: {
-      ...box,
+  ),
+  Span: element(
+    "A styled run inside a <Text>, e.g. `<Text>Total <Span fontWeight={700}>¥28</Span></Text>`. Inherits the Text's style and overrides what it sets. Not a layer: it has no box.",
+    ["TextStyle"],
+    { children: { type: { kind: "children", of: "text" }, doc: "The text: strings and numbers only." } },
+  ),
+  Rect: element("Rectangle. Has no content, so give it a size.", ["Layer", "Paint", "Border"]),
+  Ellipse: element("Ellipse inscribed in its box. Equal width and height make a circle.", ["Layer", "Paint"], {
+    strokeWidth: num("Border width in px.", "1"),
+    strokeAlign: border.strokeAlign,
+  }),
+  Image: element(
+    'Bitmap image imported from a file: `import photo from "./photo.jpg"` then `<Image src={photo} width={120} />`. Keeps its aspect ratio when only one side is set. Without `src` it draws a placeholder. `fill` shows behind it (with fit="contain" or a transparent image).',
+    ["Layer", "Paint", "Border"],
+    {
       src: { type: { kind: "image" }, doc: "An imported .png, .jpg, .webp or .gif file." },
       fit: oneOf(["cover", "contain", "fill"], "How the image fills its box: crop to cover, letterbox to contain, or stretch.", '"cover"'),
-      ...boxPaint,
-      fill: { type: { kind: "fill" }, doc: "Background behind the image (visible with fit=\"contain\" or a transparent image)." },
-      ...radius,
-      ...effects,
     },
-  },
-  Path: {
-    doc: 'SVG vector path. Set `viewBox` to scale path coordinates into `width`/`height`, or omit `viewBox` to draw in local px (hugging bounds by default). Draws `fill` and/or `stroke` when specified. Also the way to draw icons: paste the icon\'s path data with `viewBox="0 0 24 24"`.',
-    props: {
-      ...box,
+  ),
+  Path: element(
+    'SVG vector path. Set `viewBox` to scale path coordinates into `width`/`height`, or omit `viewBox` to draw in local px (hugging bounds by default). Draws `fill` and/or `stroke` when specified. Also the way to draw icons: paste the icon\'s path data with `viewBox="0 0 24 24"`.',
+    ["Layer", "Paint"],
+    {
       d: { type: { kind: "string" }, doc: 'SVG path data string (e.g. `"M 4 12 L 10 18 L 20 6"`).', required: true },
       viewBox: {
         type: { kind: "viewBox" },
         doc: 'Coordinate system `[minX, minY, width, height]` or `"minX minY width height"` mapped into the box.',
       },
-      fill: fillProp,
-      stroke: strokeProp,
       strokeWidth: num("Stroke width in px.", "1"),
       strokeCap: oneOf(["butt", "round", "square"], "Line cap style for open subpaths.", '"butt"'),
       strokeJoin: oneOf(["miter", "round", "bevel"], "Corner join style for stroked vertices.", '"miter"'),
-      strokeDash,
       fillRule: oneOf(["nonzero", "evenodd"], "Interior winding rule when `fill` is set.", '"nonzero"'),
-      ...effects,
     },
-  },
+  ),
 };
 
 // fontWeight is written as a number in JSX.
 const NUMERIC_ENUMS = new Set(["fontWeight"]);
 
 // Props an agent is likely to reach for, mapped to what we actually support.
-const HINTS: Record<string, string> = {
+export const HINTS: Record<string, string> = {
   flex: 'use width="fill" or height="fill", and `grow` for unequal shares',
   flexGrow: 'use width/height="fill" with `grow`',
   flexWrap: "use `wrap`",
@@ -295,7 +276,7 @@ const HINTS: Record<string, string> = {
   span: "use `colSpan` / `rowSpan`",
 };
 
-const ELEMENT_HINTS: Record<string, string> = {
+export const ELEMENT_HINTS: Record<string, string> = {
   Circle: "use <Ellipse> with equal width and height",
   Rectangle: "use <Rect>",
   Box: "use <Frame>, <Row> or <Column>",
@@ -501,7 +482,14 @@ export function validateProps(type: string, props: Record<string, any>) {
 
 // ---------------------------------------------------------------- generators
 
+/** Enums the .d.ts names once instead of spelling out at every prop. */
+const ENUM_ALIASES = new Map<readonly string[], string>([
+  [ALIGN, "Align"],
+  [WEIGHTS, "FontWeight"],
+]);
+
 function tsType(t: PropType, prop: string): string {
+  if (t.kind === "enum" && ENUM_ALIASES.has(t.values)) return ENUM_ALIASES.get(t.values)!;
   switch (t.kind) {
     case "number":
       return "number";
@@ -540,269 +528,31 @@ function tsType(t: PropType, prop: string): string {
   }
 }
 
-const HOOKS = "useState, useEffect, useMemo, useRef, useCallback, Fragment";
-const IMAGE_EXTS = [".png", ".jpg", ".jpeg", ".webp", ".gif"];
-const FONT_EXTS = [".woff2", ".ttf", ".otf"];
-
-export function generateDts(): string {
-  const out: string[] = [
-    "// Generated from src/shared/dsl/schema.ts by `artboards types`. Do not edit.",
-    "",
-    'declare module "artboards" {',
-    '  import type { ReactNode } from "react";',
-    `  export { ${HOOKS} } from "react";`,
-    "",
-    '  /** Fixed px, "fill" (take available space) or "hug" (fit content). */',
-    '  export type Size = number | "fill" | "hug";',
-    '  /** "#rgb", "#rrggbb", "#rrggbbaa", "rgb(...)" or "rgba(...)". */',
-    "  export type Color = string;",
-    "  /** A color, or a stop at a position 0..1 along the gradient (missing positions spread evenly). */",
-    "  export type GradientStop = Color | { color: Color; position?: number };",
-    "  export interface LinearGradient {",
-    '    type: "linear";',
-    "    /** CSS-style direction in degrees: 0 = to top, 90 = to right, 180 = to bottom. Default 180. */",
-    "    angle?: number;",
-    "    stops: GradientStop[];",
-    "  }",
-    "  export interface RadialGradient {",
-    '    type: "radial";',
-    "    /** Centre as fractions of the box. Default [0.5, 0.5]. */",
-    "    center?: [number, number];",
-    "    /** Radius as a fraction of the box size; an ellipse in a non-square box. Default 0.5. */",
-    "    radius?: number;",
-    "    stops: GradientStop[];",
-    "  }",
-    "  export type Gradient = LinearGradient | RadialGradient;",
-    "  /** A color or a gradient. */",
-    "  export type Fill = Color | Gradient;",
-    "  /** all | [vertical, horizontal] | [top, right, bottom, left] */",
-    "  export type Sides = number | [number, number] | [number, number, number, number];",
-    "  export type Padding = Sides;",
-    "  /** all | [topLeft, topRight, bottomRight, bottomLeft] */",
-    "  export type Corners = number | [number, number, number, number];",
-    '  /** A grid track: px, a `"1fr"`-style share of the free space, or `"hug"` (fit content). */',
-    '  export type Track = number | `${number}fr` | "hug";',
-    "  export interface Shadow {",
-    "    /** Horizontal offset in px. Default 0. */",
-    "    x?: number;",
-    "    /** Vertical offset in px. Default 0. */",
-    "    y?: number;",
-    "    /** Blur radius in px. Default 0. */",
-    "    blur?: number;",
-    "    /** Spread distance in px. Default 0. */",
-    "    spread?: number;",
-    '    /** Shadow color. Default "rgba(0, 0, 0, 0.25)". */',
-    "    color?: Color;",
-    "  }",
-    '  /** `[minX, minY, width, height]` or `"minX minY width height"`. */',
-    "  export type ViewBox = string | [number, number, number, number];",
-    "  export type TextContent = string | number | null | undefined | false;",
-    "  /** What importing an image file gives you. */",
-    '  export interface ImageAsset { readonly $asset: "image"; readonly id: string; readonly file: string }',
-    "  /** What importing a font file gives you; pass it to `defineFont`. */",
-    '  export interface FontAsset { readonly $asset: "font"; readonly id: string; readonly file: string }',
-    `  /** Bundled families, or a name declared with \`defineFont\`. */`,
-    `  export type FontFamily = ${builtinFamilies().map((f) => JSON.stringify(f)).join(" | ")} | (string & {});`,
-    "  export interface FontFaceSource {",
-    "    src: FontAsset;",
-    "    /** Weight this file provides. Default 400. */",
-    "    weight?: 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900;",
-    "    /** Whether this file is the italic style. Default false. */",
-    "    italic?: boolean;",
-    "  }",
-    "  /**",
-    "   * Declares a font family from imported files and returns its name for `fontFamily`.",
-    "   * Characters the files lack fall back to the bundled fonts.",
-    "   * @example",
-    '   * import regular from "./fonts/Brand-Regular.woff2";',
-    '   * import bold from "./fonts/Brand-Bold.woff2";',
-    '   * const Brand = defineFont("Brand", [{ src: regular, weight: 400 }, { src: bold, weight: 700 }]);',
-    "   */",
-    "  export function defineFont(name: string, faces: FontAsset | FontFaceSource[]): string;",
-    "",
-    "  /** A value a variant can take. */",
-    "  export type VariantValue = string | number | boolean;",
-    "  /**",
-    "   * A named state of the artboard that reviewers can switch between (the viewer, or",
-    "   * `--variant name=value` on the command line). Returns the value and a setter, like",
-    "   * useState. Calls with the same name in one artboard share one value.",
-    "   * @param initial Defaults to the first option.",
-    "   * @example",
-    '   * const [step, setStep] = useVariant("Step", [0, 1, 2, 3], 1);',
-    "   */",
-    "  export function useVariant<const T extends VariantValue>(name: string, options: readonly T[], initial?: NoInfer<T>): [T, (value: T) => void];",
-  ];
-  for (const [name, el] of Object.entries(ELEMENTS)) {
-    out.push("", `  export interface ${name}Props {`);
-    for (const [prop, def] of Object.entries(el.props)) {
-      const doc = def.default ? `${def.doc} Default ${def.default}.` : def.doc;
-      const opt = def.required ? "" : "?";
-      out.push(`    /** ${doc} */`, `    ${prop}${opt}: ${tsType(def.type, prop)};`);
-    }
-    out.push("  }", `  /** ${el.doc} */`, `  export function ${name}(props: ${name}Props): ReactNode;`);
-  }
-  out.push(
-    "}",
-    "",
-    'declare module "artboards/jsx-runtime" {',
-    '  import type { Key, ReactNode } from "react";',
-    "  export namespace JSX {",
-    "    type Element = ReactNode;",
-    "    type ElementType = (props: any) => ReactNode;",
-    "    interface ElementChildrenAttribute { children: {} }",
-    "    interface IntrinsicAttributes { key?: Key | null }",
-    "    // No lowercase tags: there is no DOM.",
-    "    interface IntrinsicElements {}",
-    "  }",
-    "}",
-  );
-  for (const ext of IMAGE_EXTS) {
-    out.push("", `declare module "*${ext}" {`, '  const asset: import("artboards").ImageAsset;', "  export default asset;", "}");
-  }
-  for (const ext of FONT_EXTS) {
-    out.push("", `declare module "*${ext}" {`, '  const asset: import("artboards").FontAsset;', "  export default asset;", "}");
-  }
-  out.push("");
-  return out.join("\n");
+/** The named enums, as declarations inside `declare module "artboards"`. */
+export function enumDeclarations(): string {
+  return [...ENUM_ALIASES]
+    .map(([values, name]) => `  export type ${name} = ${values.map((v) => (values === WEIGHTS ? v : JSON.stringify(v))).join(" | ")};`)
+    .join("\n");
 }
 
-export function generateDocs(): string {
-  const out: string[] = [
-    "# Artboards DSL",
-    "",
-    "A design file is a JSX/TSX module. Every exported component of the file you pass to the CLI is an",
-    "artboard and must return a single root element, normally a <Frame> with a fixed width and height.",
-    "Components that are not exported are reusable pieces. Props are plain function arguments.",
-    "Split larger designs across files with relative imports (`import { Button } from \"./components.jsx\"`).",
-    "",
-    "```jsx",
-    'import { Column, Frame, Row, Text } from "artboards";',
-    "",
-    "export default function Home() {",
-    "  return (",
-    '    <Frame width={390} height={844} fill="#ffffff">',
-    '      <Column width="fill" height="fill" padding={16} gap={12} align="stretch">',
-    "        <Text fontSize={24} fontWeight={700}>Title</Text>",
-    '        <Row height={44} padding={[0, 12]} align="center" justify="space-between" fill="#f3f4f6" cornerRadius={8}>',
-    "          <Text>Label</Text>",
-    "        </Row>",
-    "      </Column>",
-    "    </Frame>",
-    "  );",
-    "}",
-    "```",
-    "",
-    "## Sizing",
-    "",
-    "- `width` / `height` take a number (px), `\"fill\"` or `\"hug\"` (default).",
-    "- `\"fill\"` along a Row/Column's main axis shares the remaining space with other fill siblings, in proportion",
-    "  to `grow` (default 1); across it, the element stretches. In a Grid cell it stretches to the cell.",
-    "  Inside a <Frame> (or with `absolute`), fill spans the parent minus the x/right (y/bottom) offsets;",
-    "  setting both x and right (or y and bottom) without a size does the same.",
-    "- `minWidth` / `maxWidth` / `minHeight` / `maxHeight` bound any of these.",
-    "- Fixed and hug elements never shrink. If they do not fit, they overflow and `lint` reports it.",
-    "- There is no margin and no CSS. Use `gap` and `padding` on the parent.",
-    "",
-    "## Positioning and layering",
-    "",
-    "- Children of <Row>/<Column>/<Grid> are placed by their parent. Children of <Frame> are placed by `x`/`y`",
-    "  (or `right`/`bottom`) against the frame's outer edges.",
-    "- `absolute` takes a child of Row/Column/Grid out of the flow and places it the same way, e.g. a badge:",
-    "  `<Ellipse absolute right={-4} y={-4} width={10} height={10} fill=\"#ef4444\" />`.",
-    "- Later siblings paint on top of earlier ones. Put overlays (sheets, toasts, badges) last.",
-    "- `rotation` and `opacity` only affect painting, never layout.",
-    "",
-    "## Paint",
-    "",
-    '- `fill` and `stroke` take a color or a gradient: `{ type: "linear", angle: 135, stops: ["#f97316", "#db2777"] }`,',
-    '  `{ type: "radial", center: [0.3, 0.2], radius: 0.8, stops: [...] }`. A stop can be `{ color, position }`.',
-    "- Borders: `strokeWidth` per side, `strokeAlign` inside/center/outside, `strokeDash` for dashed lines.",
-    "- `cornerRadius` per corner: `[topLeft, topRight, bottomRight, bottomLeft]`, e.g. a bottom sheet `[20, 20, 0, 0]`.",
-    "",
-    "## Text",
-    "",
-    "- Mix styles in one paragraph with <Span>: `<Text fontSize={14}>¥<Span fontSize={28} fontWeight={700}>28</Span></Text>`.",
-    "- `maxLines` truncates with an ellipsis; give the Text a width.",
-    "- Bundled families: " + builtinFamilies().join(", ") + ". Inter and Noto Sans SC also cover characters other families lack.",
-    "",
-    "## Images and fonts",
-    "",
-    "Import files next to the design and use the imported value:",
-    "",
-    "```jsx",
-    'import { Image, Text, defineFont } from "artboards";',
-    'import latte from "./assets/latte.jpg";',
-    'import display from "./fonts/Display-Bold.woff2";',
-    "",
-    'const Display = defineFont("Display", [{ src: display, weight: 700 }]);',
-    "",
-    '// <Image src={latte} width={160} fit="cover" cornerRadius={12} />',
-    "// <Text fontFamily={Display} fontWeight={700}>Menu</Text>",
-    "```",
-    "",
-    `Images: ${IMAGE_EXTS.join(", ")}. Fonts: ${FONT_EXTS.join(", ")} (static files; a variable font renders at its default instance).`,
-    "There are no remote URLs: download a file into the project first. There is no icon element: draw icons",
-    'with <Path d="..." viewBox="0 0 24 24" />.',
-    "",
-    "## Elements",
-  ];
-  for (const [name, el] of Object.entries(ELEMENTS)) {
-    out.push("", `### <${name}>`, "", el.doc, "");
-    for (const [prop, def] of Object.entries(el.props)) {
-      const type = tsType(def.type, prop).replace("TextContent | TextContent[]", "string | number");
-      const req = def.required ? " *(required)*" : "";
-      out.push(`- \`${prop}\`: ${type}${def.default ? ` = ${def.default}` : ""}${req} — ${def.doc}`);
-    }
+/** The prop sets and elements, as declarations inside `declare module "artboards"`. */
+export function elementDeclarations(): string {
+  const out: string[] = [];
+  const members = (props: Record<string, PropDef>) =>
+    Object.entries(props).flatMap(([prop, def]) => [
+      `    /** ${def.default ? `${def.doc} Default ${def.default}.` : def.doc} */`,
+      `    ${prop}${def.required ? "" : "?"}: ${tsType(def.type, prop)};`,
+    ]);
+  out.push("", "  // Prop sets shared by several elements.");
+  for (const [name, group] of Object.entries(GROUPS)) {
+    out.push(`  /** ${group.doc} */`, `  export interface ${name}Props {`, ...members(group.props), "  }");
   }
-  out.push(
-    "",
-    "## State",
-    "",
-    `\`${HOOKS}\` are exported from "artboards" and behave as in React.`,
-    "",
-    "Visual states a reviewer should be able to switch between (loading / empty / error, the step of a",
-    "flow, a selected tab) are variants. Declare them in the artboard with `useVariant` and pass the",
-    "value down as props:",
-    "",
-    "```tsx",
-    "export function OrderTracking() {",
-    '  const [step] = useVariant("Step", [0, 1, 2, 3], 1); // name, options, initial (default: first option)',
-    "  return <Phone><Steps current={step} /></Phone>;",
-    "}",
-    "```",
-    "",
-    "Options are strings, numbers or booleans. Calls with the same name in one artboard share one value",
-    "and must declare the same options. Render another state with `--variant Step=2` (repeatable) on",
-    "`render`, `inspect` and `lint`; `inspect` lists each artboard's variants. In the viewer, select an",
-    "artboard to switch its variants in the Properties panel.",
-    "",
-    "## Interaction",
-    "",
-    "Any layer element takes `onClick`. It runs when a reviewer clicks the layer in the viewer's Play mode",
-    "(P); the innermost layer with a handler under the pointer wins. Screenshots, `inspect` and `lint`",
-    "always show the state before any click. Keep a state that matters for review in a variant, so it",
-    "can be picked without clicking and rendered from the CLI:",
-    "",
-    "```tsx",
-    'const [tab, setTab] = useVariant("Tab", ["Orders", "Favourites"]);',
-    '<Text onClick={() => setTab("Favourites")}>Favourites</Text>',
-    "```",
-    "",
-    "Use `useState` for state nobody needs to review on its own, such as a toggle's pressed look.",
-    "",
-    "A long list goes in a container with `scroll=\"vertical\"` (or `\"horizontal\"`, `\"both\"`) and a fixed or",
-    "`\"fill\"` size; it clips its content, and reviewers scroll it in Play mode with the wheel or by dragging.",
-    "Scrolling is the viewer's own state: components never see it, and screenshots show the start.",
-    "",
-    "## Commands",
-    "",
-    "- `artboards lint <file> [--variant name=value]` — type-check, render every artboard, and report layout problems. Run after every edit.",
-    "- `artboards render <file> [--frame Name] [--variant name=value] [--scale 2] [-o out.png]` — PNG screenshots (default: `out/`).",
-    "- `artboards inspect <file> [--frame Name] [--variant name=value] [--json]` — layer tree with computed bounds, source lines and variants.",
-    "- `artboards comments <file>` — open review comments from a human, with the source line of each layer.",
-    "  After addressing one, run `artboards comments <file> --resolve <id>`.",
-    "- `artboards dev <file>` — start the viewer a human uses to review and comment (long-running).",
-    "",
-  );
+  out.push("", "  // Elements. Each takes the props of the sets it extends, plus its own.");
+  for (const [name, el] of Object.entries(ELEMENTS)) {
+    const head = `  export interface ${name}Props extends ${el.groups.map((g) => `${g}Props`).join(", ")} {`;
+    const own = members(el.own);
+    out.push("", `  /** ${el.doc} */`, `  export function ${name}(props: ${name}Props): ReactNode;`);
+    out.push(...(own.length ? [head, ...own, "  }"] : [`${head}}`]));
+  }
   return out.join("\n");
 }

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Diagnostic } from "../shared/diagnostics.ts";
-import { generateDts } from "../shared/dsl/schema.ts";
+import { generateDts } from "./docs.ts";
 
 const require = createRequire(import.meta.url);
 

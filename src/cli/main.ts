@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
-import { generateDocs } from "../shared/dsl/schema.ts";
+import { generateDocs } from "./docs.ts";
 import { VariantStore } from "../shared/dsl/variants.ts";
 import { checkFrame } from "../shared/layout-lint.ts";
 import { commentsPath, resolveFileComments, updateComment } from "./comments-store.ts";
@@ -76,7 +76,7 @@ async function main(): Promise<number> {
   }
 
   if (command === "docs") {
-    console.log(generateDocs());
+    process.stdout.write(generateDocs());
     return 0;
   }
   if (command === "types") {
