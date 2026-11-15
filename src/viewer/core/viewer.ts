@@ -42,6 +42,8 @@ export interface ViewerState {
   scrollTick: number;
   /** Option/Alt is held: show distances from the selected layer to the hovered one. */
   measuring: boolean;
+  /** Both side panels are hidden, leaving the canvas the whole window. */
+  panelsHidden: boolean;
 }
 
 export interface StageElements {
@@ -85,6 +87,7 @@ export class Viewer {
     notice: null,
     scrollTick: 0,
     measuring: false,
+    panelsHidden: false,
   });
   private createBackend: StageBackendFactory;
   private host: DesignHost;
@@ -281,6 +284,11 @@ export class Viewer {
   setTool(tool: Tool) {
     this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false, measuring: false });
     if (tool === "play") this.hover(null);
+  }
+
+  /** Hides or shows both side panels at once. */
+  togglePanels() {
+    this.store.set({ panelsHidden: !this.store.get().panelsHidden });
   }
 
   /** Shows a short message over the canvas for a few seconds. */

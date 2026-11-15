@@ -66,6 +66,8 @@ svg.lucide { flex: none; display: block; }
   grid-template-areas: "bar bar bar" "left stage right";
   height: 100%;
 }
+#app.panels-hidden #left,
+#app.panels-hidden #right { display: none; }
 
 /* Toolbar */
 #bar {
@@ -73,7 +75,7 @@ svg.lucide { flex: none; display: block; }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 12px;
+  padding: 0 12px 0 8px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   min-width: 0;

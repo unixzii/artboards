@@ -5,12 +5,15 @@ import {
   MessageSquarePlus,
   Minus,
   MousePointer2,
+  PanelLeft,
   Play,
   Plus,
   TriangleAlert,
 } from "lucide-react";
 import { ButtonGroup, GroupButton } from "../components/primitives.tsx";
 import { useViewer, useViewerState } from "../core/context.ts";
+
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 function plural(n: number, word: string) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -22,11 +25,17 @@ export function Toolbar() {
   const tool = useViewerState((s) => s.tool);
   const zoom = useViewerState((s) => s.zoom);
   const diagnostics = useViewerState((s) => s.diagnostics);
+  const panelsHidden = useViewerState((s) => s.panelsHidden);
   const errors = diagnostics.filter((d) => d.severity === "error").length;
   const warnings = diagnostics.length - errors;
 
   return (
     <header id="bar">
+      <ButtonGroup label="Panels" look="plain">
+        <GroupButton id="toggle-panels" title={`${panelsHidden ? "Show" : "Hide"} side panels (${MOD}\\)`} onClick={() => viewer.togglePanels()}>
+          <PanelLeft size={16} />
+        </GroupButton>
+      </ButtonGroup>
       <strong id="file">{file || "Artboards"}</strong>
       <ButtonGroup label="Tool" look="plain">
         <GroupButton id="tool-select" title="Select and pan (V)" active={tool === "select"} onClick={() => viewer.setTool("select")}>
