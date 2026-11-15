@@ -1,10 +1,30 @@
 {
   "name": "artboards-design",
+  "description": "A harness-agnostic UI design tool built for coding agents.",
+  "keywords": [
+    "design",
+    "ui",
+    "react",
+    "prototype",
+    "cli",
+    "agent"
+  ],
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unixzii/artboards.git"
+  },
+  "homepage": "https://github.com/unixzii/artboards#readme",
+  "bugs": {
+    "url": "https://github.com/unixzii/artboards/issues"
+  },
+  "engines": {
+    "node": ">=24"
+  },
   "bin": {
-    "artboards": "./dist/cli.js"
+    "artboards": "dist/cli.js"
   },
   "files": [
     "dist"
