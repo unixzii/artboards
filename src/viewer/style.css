@@ -384,10 +384,27 @@ svg.lucide { flex: none; display: block; }
   white-space: nowrap;
   pointer-events: auto;
   cursor: pointer;
-  max-width: 640px;
 }
 .frame-label:hover, .frame-label.selected { color: var(--accent); }
-.frame-label.above { --shift: translateY(-100%); }
+/* At most as wide as the artboard on screen, one line tall. Parts that don't
+   fit wrap onto a second line, which is clipped away, so they drop out whole. */
+.frame-label.above {
+  /* The 6px gap above the artboard lives in the offset, not padding, so the clip box is exactly one line. */
+  --shift: translateY(calc(-100% - 6px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  /* Pushes anything that wraps far below the clip, whatever the font's line height. */
+  row-gap: 2em;
+  max-width: calc(var(--s) * var(--w) * 1px);
+  height: 1.45em;
+  line-height: 1.45;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+.frame-label .frame-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.frame-label.above .modified { margin-left: 0; }
 .frame-label .modified { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; color: var(--warn); }
 .frame-label .modified button { display: inline-flex; padding: 1px; border: 0; background: none; color: inherit; cursor: pointer; }
 .frame-label .modified button:hover { color: var(--text); }

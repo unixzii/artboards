@@ -51,14 +51,20 @@ function FrameLabel({ frame }: { frame: ViewFrame }) {
     );
   }
   const root = frame.root!;
+  // No wider than the artboard on screen: the name stays (cut with an ellipsis),
+  // then "Modified", then the size, each dropped whole when it no longer fits.
   return (
     <div
       className={`anchored frame-label above${root.key === selected ? " selected" : ""}`}
-      style={anchor(frame)}
+      style={anchor(frame, { w: frame.w })}
+      title={`${frame.name}  ${frame.w} × ${frame.h}${frame.modified ? "  (modified)" : ""}`}
       onClick={() => viewer.select(root.key)}
     >
-      {frame.name}&nbsp;&nbsp;{frame.w} × {frame.h}
+      <span className="frame-name">{frame.name}</span>
       <ModifiedBadge frame={frame} />
+      <span className="frame-size">
+        {frame.w} × {frame.h}
+      </span>
     </div>
   );
 }
