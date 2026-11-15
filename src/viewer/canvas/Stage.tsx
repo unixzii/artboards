@@ -2,7 +2,7 @@
 // the comment box). Overlay elements are anchored to canvas points with CSS
 // variables, so they follow pan and zoom without React re-rendering.
 
-import { Component, RotateCcw, TriangleAlert } from "lucide-react";
+import { ChevronRight, Component, RotateCcw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useViewer, useViewerState } from "../core/context.ts";
 import { describe, pinPosition, type ViewFrame } from "../core/model.ts";
@@ -120,9 +120,10 @@ function CommentBox() {
     // Pointer and wheel events stay in the box instead of panning the canvas.
     <div className="anchored popover" style={anchor(draft.at)} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
       <div className="target">
-        <span>{node.frame.name} · </span>
+        <span className="target-frame">{node.frame.name}</span>
+        <ChevronRight size={11} />
         {node.component && <Component size={11} className="target-icon" />}
-        <span>
+        <span className="target-node">
           {node.component ? node.component.name : node.type} {describe(node)}
         </span>
       </div>

@@ -36,9 +36,15 @@ export function LinkButton(props: { onClick: () => void; title?: string; childre
   );
 }
 
-export function ButtonGroup({ label, children }: { label?: string; children: ReactNode }) {
+/**
+ * A row of related buttons.
+ * - `outline`: bordered, with dividers.
+ * - `plain`: no outline; only the active button gets a background.
+ * - `segmented`: a filled track; the active button is a raised thumb.
+ */
+export function ButtonGroup({ label, look = "outline", children }: { label?: string; look?: "outline" | "plain" | "segmented"; children: ReactNode }) {
   return (
-    <div className="group" role="group" aria-label={label}>
+    <div className={look === "outline" ? "group" : `group ${look}`} role="group" aria-label={label}>
       {children}
     </div>
   );

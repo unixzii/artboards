@@ -1,5 +1,5 @@
 import { Check, Component, Copy, RotateCcw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ButtonGroup, Empty, GroupButton, LinkButton } from "../components/primitives.tsx";
 import { Section } from "../components/Section.tsx";
 import { useViewer, useViewerState } from "../core/context.ts";
@@ -24,14 +24,61 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
+const CHECKER = "repeating-conic-gradient(#d4d4d8 0 25%, #fff 0 50%) 0 0 / 6px 6px";
+let colorProbe: CanvasRenderingContext2D | null = null;
+
+/** Any CSS color as `#rrggbb` plus alpha 0–1, or null if it isn't one. */
+function parseColor(css: string): { hex: string; alpha: number } | null {
+  if (!CSS.supports("color", css)) return null;
+  colorProbe ??= document.createElement("canvas").getContext("2d");
+  if (!colorProbe) return null;
+  colorProbe.fillStyle = css;
+  // The canvas normalizes to `#rrggbb` when opaque, `rgba(r, g, b, a)` otherwise.
+  const out = String(colorProbe.fillStyle);
+  if (out.startsWith("#")) return { hex: out, alpha: 1 };
+  const m = out.match(/rgba?\(([^)]+)\)/);
+  if (!m) return null;
+  const [r, g, b, a = 1] = m[1].split(",").map(Number);
+  const hex = "#" + [r, g, b].map((n) => n.toString(16).padStart(2, "0")).join("");
+  return { hex, alpha: a };
+}
+
+/** A color chip; translucent colors show the opaque color on the left and the real one over a checkerboard on the right. */
+function Swatch({ color }: { color: string }) {
+  const parsed = parseColor(color);
+  if (!parsed || parsed.alpha >= 1) return <span className="swatch" style={{ background: color }} />;
+  return (
+    <span
+      className="swatch"
+      style={{ background: `linear-gradient(90deg, ${parsed.hex} 50%, transparent 50%), linear-gradient(${color}, ${color}), ${CHECKER}` }}
+    />
+  );
+}
+
 function ShadowValue({ shadow }: { shadow: Record<string, unknown> }) {
   const color = typeof shadow.color === "string" ? shadow.color : "rgba(0, 0, 0, 0.25)";
-  const parts = [`${shadow.x ?? 0}, ${shadow.y ?? 0}`, `blur ${shadow.blur ?? 0}`];
-  if (shadow.spread) parts.push(`spread ${shadow.spread}`);
+  const parsed = parseColor(color);
+  const fields: [string, unknown][] = [
+    ["X", shadow.x],
+    ["Y", shadow.y],
+    ["Blur", shadow.blur],
+    ["Spread", shadow.spread],
+  ];
   return (
-    <div>
-      <span className="swatch" style={{ background: color }} />
-      {parts.join(" · ")}
+    <div className="shadow">
+      <div className="shadow-grid">
+        {fields.map(([label, v]) => (
+          <Fragment key={label}>
+            <span className="label">{label}</span>
+            <span>{String(v ?? 0)}</span>
+          </Fragment>
+        ))}
+      </div>
+      <div className="shadow-color">
+        <Swatch color={color} />
+        <span>{parsed ? parsed.hex : color}</span>
+        {parsed && <span>{Math.round(parsed.alpha * 100)}%</span>}
+      </div>
     </div>
   );
 }
@@ -71,7 +118,7 @@ function PropRow({ name, value }: { name: string; value: unknown }) {
         <span className="k">{name}</span>
         <span className="v">
           <span className="swatch" style={{ background: cssGradient(value) }} />
-          {value.type} · {value.stops.length} stops
+          {value.type}, {value.stops.length} stops
         </span>
       </div>
     );
@@ -97,7 +144,7 @@ function PropRow({ name, value }: { name: string; value: unknown }) {
     <div className="row">
       <span className="k">{name}</span>
       <span className="v">
-        {isColor && <span className="swatch" style={{ background: value }} />}
+        {isColor && <Swatch color={value} />}
         {typeof value === "string" ? value : JSON.stringify(value)}
       </span>
     </div>
@@ -133,7 +180,7 @@ function VariantPicker({ frame, variant }: { frame: string; variant: VariantInfo
   const title = (i: number) => (Object.is(variant.options[i], variant.initial) ? `${labels[i]} (initial)` : labels[i]);
   if (labels.length <= 5 && labels.join("").length <= 24) {
     return (
-      <ButtonGroup label={variant.name}>
+      <ButtonGroup label={variant.name} look="segmented">
         {labels.map((label, i) => (
           <GroupButton key={label} title={title(i)} active={i === current} onClick={() => pick(i)}>
             {label}
@@ -201,18 +248,16 @@ function Inspector({ node }: { node: ViewNode }) {
             {!comp && node.props.name && ` “${node.props.name}”`}
           </span>
         </div>
-        <div className="source">
-          {source ? <SourceCopy source={source} /> : node.frame.name}
-          {owner && (
-            <span className="owner">
-              {" · in "}
-              <LinkButton title="Select enclosing component" onClick={() => viewer.select(owner.key)}>
-                <Component size={11} />
-                <span>{owner.component!.name}</span>
-              </LinkButton>
-            </span>
-          )}
-        </div>
+        <div className="source">{source ? <SourceCopy source={source} /> : node.frame.name}</div>
+        {owner && (
+          <div className="owner">
+            <span>Inside</span>
+            <LinkButton title="Select enclosing component" onClick={() => viewer.select(owner.key)}>
+              <Component size={11} />
+              <span>{owner.component!.name}</span>
+            </LinkButton>
+          </div>
+        )}
       </div>
       <div className="metrics">
         <Metric label="X" value={node.abs.x} />
