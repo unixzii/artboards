@@ -175,24 +175,32 @@ export interface ErrorDiagnosticOptions {
   mapSource?: SourceMapper;
 }
 
-/** Turns a thrown error into a diagnostic, mapping bundle stack frames back to the DSL source line. */
+/** The DSL source line of the innermost stack frame inside the compiled design bundle. */
+function sourceFromStack(err: Error, opts: ErrorDiagnosticOptions): string | undefined {
+  if (!opts.bundleTag || !opts.mapSource || !err.stack) return undefined;
+  const at = err.stack
+    .split("\n")
+    .filter((l) => /^\s*(?:at |@)/.test(l) || l.includes("@"))
+    .find((l) => l.includes(opts.bundleTag!));
+  const m = at && /:(\d+):(\d+)\)?\s*$/.exec(at);
+  return m ? opts.mapSource(Number(m[1]) + (opts.lineOffset ?? 0), Number(m[2])) : undefined;
+}
+
+/**
+ * Turns a thrown error into a diagnostic, mapping bundle stack frames back to
+ * the DSL source line. A DslError that names no element (e.g. one thrown by a
+ * hook like useVariant) points at the design code that called into the DSL.
+ */
 export function errorToDiagnostic(e: unknown, opts: ErrorDiagnosticOptions = {}): Diagnostic {
-  if (e instanceof DslError) return { severity: "error", rule: "dsl", message: e.bare, source: e.source, frame: opts.frame };
-  const err = e instanceof Error ? e : new Error(String(e));
-  let source: string | undefined;
-  if (opts.bundleTag && opts.mapSource && err.stack) {
-    const at = err.stack
-      .split("\n")
-      .filter((l) => /^\s*(?:at |@)/.test(l) || l.includes("@"))
-      .find((l) => l.includes(opts.bundleTag!));
-    const m = at && /:(\d+):(\d+)\)?\s*$/.exec(at);
-    if (m) source = opts.mapSource(Number(m[1]) + (opts.lineOffset ?? 0), Number(m[2]));
+  if (e instanceof DslError) {
+    return { severity: "error", rule: "dsl", message: e.bare, source: e.source ?? sourceFromStack(e, opts), frame: opts.frame };
   }
+  const err = e instanceof Error ? e : new Error(String(e));
   return {
     severity: "error",
     rule: "runtime",
     message: `${err.name}: ${err.message}`,
-    source,
+    source: sourceFromStack(err, opts),
     frame: opts.frame,
   };
 }
