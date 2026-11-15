@@ -12,6 +12,10 @@ export function formatVariants(variants: VariantInfo[]): string {
   return `variants:\n${lines.join("\n")}\n`;
 }
 
+/** Layout values to two decimals: layout is subpixel, and 16.799999 reads as noise. */
+const round = (n: number) => Math.round(n * 100) / 100;
+const roundBox = (b: SceneNode["layout"]) => ({ x: round(b.x), y: round(b.y), width: round(b.width), height: round(b.height) });
+
 export function formatTree(root: SceneNode): string {
   const lines: string[] = [];
   const walk = (n: SceneNode, depth: number) => {
@@ -19,7 +23,7 @@ export function formatTree(root: SceneNode): string {
     for (const c of layerChildren(n)) walk(c, depth + 1);
   };
   const line = (n: SceneNode, depth: number) => {
-    const { x, y, width, height } = n.layout;
+    const { x, y, width, height } = roundBox(n.layout);
     if (n.component) {
       const summary = formatPropsSummary(n.component.props);
       lines.push(
@@ -43,7 +47,7 @@ export function toJson(n: SceneNode): object {
       type: "Component",
       component: n.component.name,
       props: n.component.props,
-      layout: n.layout,
+      layout: roundBox(n.layout),
       source: sourceOf(n),
       children: layerChildren(n).map(toJson),
     };
@@ -53,7 +57,7 @@ export function toJson(n: SceneNode): object {
     type: n.type,
     ...(n.type === "Text" ? { text: textContentOf(n), ...(n.runs && n.runs.length > 1 ? { runs: n.runs.map(({ text, props }) => ({ text, props })) } : {}) } : {}),
     props,
-    layout: n.layout,
+    layout: roundBox(n.layout),
     source: $source,
     children: layerChildren(n).map(toJson),
   };

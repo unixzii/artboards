@@ -26,7 +26,7 @@ function Header({ width, height, ghosts }: { width: number; height: number; ghos
             Artboards
           </Text>
         </Selection>
-        <SizeBadge>596 × 136</SizeBadge>
+        <SizeBadge>595 × 136</SizeBadge>
         <Text fontSize={22} color={color.muted}>
           Design UI as code, with your agents.
         </Text>

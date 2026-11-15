@@ -13,7 +13,7 @@ import {
   type Shadow,
   type Sides,
 } from "./scene.ts";
-import { paragraphFor, textSizeOf } from "./text.ts";
+import { layoutParagraph, paragraphFor, textSizeOf } from "./text.ts";
 
 const DEFAULT_SHADOW_COLOR = "rgba(0, 0, 0, 0.25)";
 const PLACEHOLDER_FILL = "#e5e7eb";
@@ -56,11 +56,11 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
     for (const child of node.children) paintNode(engine, canvas, child, greekBelow);
   } else if (node.type === "Text" && textSizeOf(node) < greekBelow) {
     const para = paragraphFor(engine, node);
-    para.layout(w);
+    layoutParagraph(para, w);
     greekText(ck, canvas, node, para);
   } else if (node.type === "Text") {
     const para = paragraphFor(engine, node);
-    para.layout(w);
+    layoutParagraph(para, w);
     const shadows = normalizeShadows(p.shadow);
     const draw = () => canvas.drawParagraph(para, 0, 0);
     if (shadows.length > 0 && w > 0 && h > 0) drawFilteredShadows(ck, canvas, shadows, draw);

@@ -140,6 +140,9 @@ export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph
   };
 
   const style = new ck.ParagraphStyle({
+    // Break lines on exact advances. With Skia's rounding hack on, a line needs
+    // its width rounded up, so text in a box exactly as wide as it would wrap.
+    applyRoundingHack: false,
     textAlign: { left: ck.TextAlign.Left, center: ck.TextAlign.Center, right: ck.TextAlign.Right }[
       (p.textAlign ?? "left") as "left" | "center" | "right"
     ],
@@ -171,7 +174,22 @@ export interface Constraint {
   height: number | null | undefined;
 }
 
-/** Taffy measure callback body for Text nodes. */
+/**
+ * Lays a paragraph out to fill a box `width` wide. Boxes are as wide as the
+ * text's exact advance, and floating-point error could then push the last word
+ * onto a new line, so lines get a hair of slack. Left-aligned text is drawn
+ * from the box's edge as before; centred text moves by half the slack.
+ */
+export function layoutParagraph(para: Paragraph, width: number) {
+  para.layout(width + LINE_SLACK);
+}
+
+const LINE_SLACK = 0.01;
+
+/**
+ * Taffy measure callback body for Text nodes. Sizes are exact, not rounded up
+ * to whole pixels, so text centred in its parent is centred to the subpixel.
+ */
 export function measureText(
   engine: TextEngine,
   node: PaintableNode,
@@ -182,20 +200,20 @@ export function measureText(
   let width = known.width;
   if (width == null) {
     para.layout(1e7);
-    const max = Math.ceil(para.getMaxIntrinsicWidth());
-    if (available.width === "min-content") width = Math.ceil(para.getMinIntrinsicWidth());
+    const max = para.getMaxIntrinsicWidth();
+    if (available.width === "min-content") width = para.getMinIntrinsicWidth();
     else if (available.width === "max-content") width = max;
     else width = Math.min(max, available.width);
   }
-  para.layout(width);
-  return { width, height: known.height ?? Math.ceil(para.getHeight()) };
+  layoutParagraph(para, width);
+  return { width, height: known.height ?? para.getHeight() };
 }
 
 /** Height the text needs at the node's final width (may exceed a fixed height). */
 export function naturalTextHeight(engine: TextEngine, node: PaintableNode): number {
   const para = paragraphFor(engine, node);
-  para.layout(node.layout.width);
-  return Math.ceil(para.getHeight());
+  layoutParagraph(para, node.layout.width);
+  return para.getHeight();
 }
 
 export function releaseParagraphs(root: PaintableNode) {

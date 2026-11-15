@@ -248,6 +248,10 @@ function resolveFarInsets(root: SceneNode) {
 
 function computeLayout(root: SceneNode, engine: RenderEngine, stretched: Stretched) {
   const tree = new TaffyTree();
+  // Keep subpixel positions and sizes. Rounding to whole pixels snaps each edge
+  // on its own, so a 16.8 × 16.8 circle could come out 17 × 16, and centred
+  // content drifts by up to half a pixel. Skia paints fractions crisply enough.
+  tree.disableRounding();
   const ids = new Map<SceneNode, bigint>();
 
   const build = (node: SceneNode, parent: ParentKind): bigint => {
