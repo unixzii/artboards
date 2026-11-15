@@ -1,5 +1,5 @@
 // Single source of truth for the DSL's elements and props: runtime validation
-// and the element part of `types/artboards.d.ts` (see src/cli/docs.ts) come from here.
+// and the element part of the generated d.ts (see src/docs/generate.ts) come from here.
 
 import { knownFamilies } from "../fonts.ts";
 import { isAssetRef, parseViewBox } from "../scene.ts";

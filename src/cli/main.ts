@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
-import { generateDocs } from "./docs.ts";
 import { VariantStore } from "../shared/dsl/variants.ts";
 import { checkFrame } from "../shared/layout-lint.ts";
+import { distFile } from "./dist.ts";
 import { commentsPath, resolveFileComments, updateComment } from "./comments-store.ts";
 import { startDevServer } from "./dev-server.ts";
 import { formatTree, formatVariants, toJson } from "./inspect.ts";
@@ -20,7 +20,6 @@ import {
   type VariantPresets,
 } from "./pipeline.ts";
 import { renderToPng } from "./skia.ts";
-import { ensureTypes } from "./typecheck.ts";
 
 const USAGE = `Usage:
   artboards lint    <file> [--json]                              type-check, render and check every artboard
@@ -29,8 +28,7 @@ const USAGE = `Usage:
     lint, render and inspect take --variant name=value (repeatable) to render another state
   artboards dev     <file> [--port 4400] [--host 127.0.0.1]      open the viewer for human review, live-reloading
   artboards comments <file> [--all] [--resolve id] [--json]      review comments left in the viewer
-  artboards docs                                                 print the DSL reference
-  artboards types                                                write types/artboards.d.ts`;
+  artboards docs                                                 print the DSL reference`;
 
 function report(diagnostics: Diagnostic[]) {
   for (const d of diagnostics) console.error(formatDiagnostic(d));
@@ -76,11 +74,7 @@ async function main(): Promise<number> {
   }
 
   if (command === "docs") {
-    process.stdout.write(generateDocs());
-    return 0;
-  }
-  if (command === "types") {
-    console.log(ensureTypes());
+    process.stdout.write(readFileSync(distFile("docs.md"), "utf8"));
     return 0;
   }
   if (!file || !["lint", "render", "inspect", "dev", "comments"].includes(command)) {

@@ -1,12 +1,12 @@
-// The generated `types/artboards.d.ts` and the `artboards docs` reference. Their
-// prose lives in ./docs/ as plain files; `{{name}}` marks where generated text goes.
+// Build-time generator for dist/artboards.d.ts and dist/docs.md (`artboards docs`).
+// Their prose lives next to this file; `{{name}}` marks where generated text goes.
 
 import { readFileSync } from "node:fs";
 import { ELEMENT_HINTS, HINTS, elementDeclarations, enumDeclarations } from "../shared/dsl/schema.ts";
+import { ASSET_KINDS } from "../cli/assets.ts";
 import { builtinFamilies } from "../shared/fonts.ts";
-import { ASSET_KINDS } from "./assets.ts";
 
-const read = (name: string) => readFileSync(new URL(`./docs/${name}`, import.meta.url), "utf8");
+const read = (name: string) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
 
 /** Replaces every `{{name}}`; a placeholder without a value is a mistake in the template. */
 function fill(template: string, values: Record<string, string>): string {
@@ -33,8 +33,7 @@ export function generateDts(): string {
   });
 }
 
-export function generateDocs(): string {
-  const dts = generateDts();
+export function generateDocs(dts = generateDts()): string {
   // Only the "artboards" module: the JSX and file-import declarations are plumbing.
   const start = dts.indexOf('declare module "artboards" {');
   const api = dts.slice(start, dts.indexOf("\n}\n", start) + 2);

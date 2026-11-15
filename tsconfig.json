@@ -1,5 +1,5 @@
 {
-  // Node side: shared contracts and CLI. No DOM types, so browser globals are errors here.
+  // Node side: shared contracts, CLI and dev scripts. No DOM types, so browser globals are errors here.
   "compilerOptions": {
     "target": "esnext",
     "module": "nodenext",
@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/shared", "src/cli"]
+  "include": ["src/shared", "src/cli", "src/docs", "scripts"]
 }

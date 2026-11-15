@@ -1,28 +1,14 @@
 // Type-checks a DSL file against the generated declarations by running tsc.
 
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Diagnostic } from "../shared/diagnostics.ts";
-import { generateDts } from "./docs.ts";
+import { distFile } from "./dist.ts";
 
 const require = createRequire(import.meta.url);
-
-// Lives inside the package so its `import "react"` resolves to our @types/react.
-export const DTS_PATH = fileURLToPath(new URL("../../types/artboards.d.ts", import.meta.url));
-
-/** Writes the declaration file if it is missing or out of date. */
-export function ensureTypes(): string {
-  const next = generateDts();
-  if (!existsSync(DTS_PATH) || readFileSync(DTS_PATH, "utf8") !== next) {
-    mkdirSync(dirname(DTS_PATH), { recursive: true });
-    writeFileSync(DTS_PATH, next);
-  }
-  return DTS_PATH;
-}
 
 export async function typecheck(file: string): Promise<Diagnostic[]> {
   const tsPkg = require.resolve("typescript/package.json");
@@ -45,7 +31,7 @@ export async function typecheck(file: string): Promise<Diagnostic[]> {
         skipLibCheck: true,
         types: [],
       },
-      files: [resolve(file), ensureTypes()],
+      files: [resolve(file), distFile("artboards.d.ts")],
     };
     writeFileSync(join(dir, "tsconfig.json"), JSON.stringify(config));
     const { status, out } = await new Promise<{ status: number | null; out: string }>((done) => {

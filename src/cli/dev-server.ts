@@ -4,18 +4,16 @@
 import { createReadStream, existsSync, watch } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
 import type { Diagnostic } from "../shared/diagnostics.ts";
 import type { BuildPayload, Comment } from "../shared/protocol.ts";
 import { assetPath } from "./assets.ts";
 import { bundleDesign } from "./bundler.ts";
 import { addComment, commentsPath, readComments, updateComment } from "./comments-store.ts";
+import { distFile } from "./dist.ts";
 import { fontDir } from "./fonts.ts";
 import { canvasKitDir, taffyWasmPath } from "./skia.ts";
 import { typecheck } from "./typecheck.ts";
 
-const viewerDir = fileURLToPath(new URL("../viewer/", import.meta.url));
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -31,21 +29,6 @@ const TYPES: Record<string, string> = {
   ".webp": "image/webp",
   ".gif": "image/gif",
 };
-
-async function bundleViewer(): Promise<string> {
-  const result = await build({
-    entryPoints: [join(viewerDir, "main.tsx")],
-    bundle: true,
-    format: "esm",
-    target: "es2022",
-    jsx: "automatic",
-    define: { "process.env.NODE_ENV": '"production"' },
-    write: false,
-    sourcemap: "inline",
-    logLevel: "silent",
-  });
-  return result.outputFiles[0].text;
-}
 
 function send(res: ServerResponse, status: number, body: string | object, type = "text/plain; charset=utf-8") {
   const text = typeof body === "string" ? body : JSON.stringify(body);
@@ -83,7 +66,8 @@ export interface DevServerOptions {
 export async function startDevServer({ file, port, host }: DevServerOptions): Promise<string> {
   file = resolve(file);
   const relFile = relative(process.cwd(), file);
-  await bundleViewer(); // fail at startup, not on first request, if the viewer does not build
+  // The viewer is built ahead of time into dist/viewer/; fail at startup if it is missing.
+  const viewer = { "/": distFile("viewer/index.html"), "/style.css": distFile("viewer/style.css"), "/client.js": distFile("viewer/client.js") };
 
   const streams = new Set<ServerResponse>();
   const broadcast = (event: string, payload: unknown) => {
@@ -187,10 +171,7 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
     const path = decodeURIComponent(url.pathname);
     try {
       if (req.method === "GET") {
-        if (path === "/") return sendFile(res, join(viewerDir, "index.html"));
-        if (path === "/style.css") return sendFile(res, join(viewerDir, "style.css"));
-        // Bundled per request (tens of ms) so viewer edits show up on reload.
-        if (path === "/client.js") return send(res, 200, await bundleViewer(), TYPES[".js"]);
+        if (Object.hasOwn(viewer, path)) return sendFile(res, viewer[path as keyof typeof viewer]);
         if (path === "/design.js") {
           return version !== null ? send(res, 200, designCode, TYPES[".js"]) : send(res, 404, "no valid build");
         }
