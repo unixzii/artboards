@@ -68,7 +68,7 @@ Save the example above as `design.tsx`, then you can run the following commands 
 | Command | What it does |
 |---|---|
 | `lint <file> [--variant name=value] [--json]` | Type-checks the file, renders every artboard and reports layout problems such as overflow or clipped text. Exits with 1 when there are errors. |
-| `render <file> [-f Name] [--variant name=value] [-s 2] [-o out.png]` | Writes PNG screenshots. The default path is `out/<file>.<Artboard>.png`. |
+| `render <file> [-f Name] [--variant name=value] [-s 2] [-o out.png] [--transparent]` | Writes PNG screenshots. The default path is `out/<file>.<Artboard>.png`. Artboards sit on white, as in the viewer, unless `--transparent`. |
 | `inspect <file> [-f Name] [--variant name=value] [--json]` | Prints each artboard's layer tree with its position, size, source line and variants. |
 | `dev <file> [-p 4400] [--host 127.0.0.1]` | Starts the browser viewer, which reloads on every save. Reviewers can inspect layers, switch variants, try Play mode (P) and comment. Keeps running until stopped. |
 | `build <file> [-o dir]` | Writes the viewer and the design as a static site (default: `out/<file>/`) for reviewers who don't have the CLI. |

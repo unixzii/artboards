@@ -117,7 +117,8 @@ Scrolling is the viewer's own state: components never see it, and screenshots sh
 ## Commands
 
 - `artboards lint <file> [--variant name=value]` — type-check, render every artboard, and report layout problems. Run after every edit.
-- `artboards render <file> [--frame Name] [--variant name=value] [--scale 2] [-o out.png]` — PNG screenshots (default: `out/`).
+- `artboards render <file> [--frame Name] [--variant name=value] [--scale 2] [-o out.png] [--transparent]` — PNG screenshots
+  (default: `out/`), on white unless `--transparent`.
 - `artboards inspect <file> [--frame Name] [--variant name=value] [--json]` — layer tree with computed bounds, source lines and variants.
 - `artboards comments <file>` — open review comments from a human, with the source line of each layer.
   After addressing one, run `artboards comments <file> --resolve <id>`.

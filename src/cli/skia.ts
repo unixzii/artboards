@@ -39,15 +39,19 @@ export function createEngine(): Promise<NodeEngine> {
   })());
 }
 
-/** Rasterizes one artboard on the CPU and returns PNG bytes. */
-export function renderToPng(engine: RenderEngine, root: PaintableNode, scale = 1): Uint8Array {
+/**
+ * Rasterizes one artboard on the CPU and returns PNG bytes. The artboard sits
+ * on white, as in the viewer, unless `transparent`: then whatever it does not
+ * paint stays transparent (icons, images to place on other backgrounds).
+ */
+export function renderToPng(engine: RenderEngine, root: PaintableNode, scale = 1, { transparent = false } = {}): Uint8Array {
   const { ck } = engine;
   const width = Math.ceil(root.layout.width * scale);
   const height = Math.ceil(root.layout.height * scale);
   const surface = ck.MakeSurface(width, height);
   if (!surface) throw new Error(`Could not create a ${width}x${height} surface`);
   const canvas = surface.getCanvas();
-  canvas.clear(ck.WHITE);
+  canvas.clear(transparent ? ck.TRANSPARENT : ck.WHITE);
   canvas.scale(scale, scale);
   canvas.translate(-root.layout.x, -root.layout.y);
   paintNode(engine, canvas, root);

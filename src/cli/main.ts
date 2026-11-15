@@ -95,7 +95,7 @@ async function lint(file: string, opts: { json?: true; variant: VariantPresets }
 async function eachFrame(
   command: "render" | "inspect",
   file: string,
-  opts: { frame?: string; variant: VariantPresets; out?: string; scale?: number; json?: true },
+  opts: { frame?: string; variant: VariantPresets; out?: string; scale?: number; transparent?: true; json?: true },
 ): Promise<number> {
   const presets = opts.variant;
   let frames;
@@ -133,7 +133,7 @@ async function eachFrame(
       const scale = opts.scale ?? 1;
       const png = opts.out ?? join("out", `${basename(file, extname(file))}.${frame.name}${variantSuffix(presets, built.variants)}.png`);
       mkdirSync(dirname(png), { recursive: true });
-      writeFileSync(png, renderToPng(built.engine, built.root, scale));
+      writeFileSync(png, renderToPng(built.engine, built.root, scale, { transparent: opts.transparent }));
       console.log(`${png}  ${out("dim", `${width}x${height} @${scale}x`)}`);
       report(diagnostics);
     } else if (opts.json) {
@@ -263,6 +263,7 @@ program
   .addOption(variantOption())
   .addOption(new Option("-s, --scale <factor>", "pixel density of the PNG").argParser(positiveNumber).default(1))
   .addOption(new Option("-o, --out <png>", "where to write the PNG; needs a single artboard (--frame)"))
+  .addOption(new Option("--transparent", "leave the PNG transparent where the artboard paints nothing, instead of white"))
   .action(run((file, opts) => eachFrame("render", file, opts)));
 
 program
