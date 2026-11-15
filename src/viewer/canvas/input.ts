@@ -2,7 +2,7 @@
 //
 //   drag            pan                 wheel            pan
 //   click           select / comment    ctrl|cmd+wheel   zoom at cursor
-//   two fingers     pinch zoom + pan    V C Esc 0 !      tools, deselect, 100%, fit
+//   two fingers     pinch zoom + pan    V C P Esc 0 !    tools, deselect, 100%, fit
 
 import type { Point } from "../core/model.ts";
 import type { Viewer } from "../core/viewer.ts";
@@ -84,11 +84,12 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
   );
 
   on(window, "keydown", (e) => {
-    if (e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return;
     const key = e.key.toLowerCase();
     if (key === "escape") viewer.cancel();
     else if (key === "v") viewer.setTool("select");
     else if (key === "c") viewer.setTool("comment");
+    else if (key === "p") viewer.setTool("play");
     else if (key === "!" || (e.shiftKey && e.code === "Digit1")) viewer.fit();
     else if (key === "0") viewer.resetZoom();
   });

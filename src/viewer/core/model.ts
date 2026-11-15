@@ -2,6 +2,7 @@
 // canvas, plus the geometry queries on them. No rendering, no DOM.
 
 import type { Diagnostic } from "../../shared/diagnostics.ts";
+import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
 import { layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
@@ -22,11 +23,17 @@ export interface LiveFrameInput {
   name: string;
   root: SceneNode | null;
   error?: Diagnostic;
+  variants: { list(): VariantInfo[] };
+  modified: boolean;
 }
 
 export interface ViewFrame {
   name: string;
   error?: Diagnostic;
+  /** Variants rendered in the artboard, with their current values. */
+  variants: VariantInfo[];
+  /** Not in its initial state: a variant was changed or a layer clicked. Comments are off until it is reset. */
+  modified: boolean;
   /** Null when the artboard failed to build. */
   root: ViewNode | null;
   /** Position and size on the canvas. */
@@ -136,7 +143,7 @@ export function buildModel(inputs: LiveFrameInput[]): Model {
       y += rowHeight + GAP + 40;
       rowHeight = 0;
     }
-    const frame: ViewFrame = { name: input.name, error: input.error, root: null, x, y, w, h };
+    const frame: ViewFrame = { name: input.name, error: input.error, variants: input.variants.list(), modified: input.modified, root: null, x, y, w, h };
     if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);
@@ -197,4 +204,12 @@ export function pinPosition(comment: ResolvedComment, model: Model): Point | nul
     y = n.abs.y + n.layout.height / 2;
   }
   return { x: frame.x + x, y: frame.y + y };
+}
+
+/** The onClick of the innermost layer at or above `node` that has one. */
+export function clickHandler(node: ViewNode | null): (() => void) | null {
+  for (let n = node; n; n = n.parent) {
+    if (typeof n.props.onClick === "function") return n.props.onClick;
+  }
+  return null;
 }

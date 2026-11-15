@@ -89,7 +89,19 @@ export function Button({
   );
 }
 
-export function Chip({ children, selected = false, icon, size = "md" }: { children: ReactNode; selected?: boolean; icon?: IconName; size?: "sm" | "md" }) {
+export function Chip({
+  children,
+  selected = false,
+  icon,
+  size = "md",
+  onClick,
+}: {
+  children: ReactNode;
+  selected?: boolean;
+  icon?: IconName;
+  size?: "sm" | "md";
+  onClick?: () => void;
+}) {
   const h = size === "sm" ? 28 : 34;
   return (
     <Row
@@ -102,6 +114,7 @@ export function Chip({ children, selected = false, icon, size = "md" }: { childr
       fill={selected ? color.espresso : color.white}
       stroke={selected ? undefined : color.oat}
       strokeAlign="inside"
+      onClick={onClick}
     >
       {icon && <Icon name={icon} size={14} tint={selected ? color.white : color.muted} />}
       <Text fontSize={size === "sm" ? 12 : 13} fontWeight={selected ? 600 : 500} color={selected ? color.white : color.espresso}>
@@ -168,13 +181,13 @@ export function Stepper({ value, compact = false }: { value: number; compact?: b
   );
 }
 
-export function Segmented({ options, value, width = "fill" }: { options: string[]; value: string; width?: Size }) {
+export function Segmented({ options, value, width = "fill", onChange }: { options: string[]; value: string; width?: Size; onChange?: (value: string) => void }) {
   return (
     <Row name="Segmented" width={width} height={40} padding={4} gap={4} fill={color.crema} cornerRadius={20} stroke={color.oat} strokeAlign="inside">
       {options.map((o) => {
         const on = o === value;
         return (
-          <Row key={o} width="fill" height="fill" align="center" justify="center" cornerRadius={16} fill={on ? color.white : undefined} shadow={on ? { y: 1, blur: 3, color: "rgba(43, 26, 18, 0.14)" } : undefined}>
+          <Row key={o} width="fill" height="fill" align="center" justify="center" cornerRadius={16} fill={on ? color.white : undefined} shadow={on ? { y: 1, blur: 3, color: "rgba(43, 26, 18, 0.14)" } : undefined} onClick={onChange && (() => onChange(o))}>
             <Text fontSize={13} fontWeight={on ? 600 : 500} color={on ? color.espresso : color.muted}>
               {o}
             </Text>

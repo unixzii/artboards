@@ -20,7 +20,7 @@ function elementTagName(el: any): string {
 
 function sanitizeValue(value: unknown, depth = 0): unknown {
   if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
-  if (typeof value === "function") return `[Function${value.name ? ` ${value.name}` : ""}]`;
+  if (typeof value === "function") return "[Function]";
   if (isValidElement(value)) return `<${elementTagName(value)}>`;
   if (depth >= 3) return String(value);
   if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, depth + 1));

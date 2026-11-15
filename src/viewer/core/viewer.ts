@@ -3,15 +3,17 @@
 
 import { resolveComment } from "../../shared/comments.ts";
 import type { Diagnostic } from "../../shared/diagnostics.ts";
+import type { VariantValue } from "../../shared/dsl/variants.ts";
 import type { RenderEngine } from "../../shared/engine.ts";
 import type { BuildPayload, Comment, ResolvedComment } from "../../shared/protocol.ts";
 import type { SceneNode } from "../../shared/scene.ts";
 import { DesignHost } from "../runtime/host.ts";
 import * as api from "./api.ts";
-import { buildModel, describe, EMPTY_MODEL, nodeKey, type Model, type Point, type ViewNode } from "./model.ts";
+import { buildModel, clickHandler, describe, EMPTY_MODEL, nodeKey, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
 
-export type Tool = "select" | "comment";
+/** select: inspect layers; comment: pin a comment to a layer; play: run the design's onClick handlers. */
+export type Tool = "select" | "comment" | "play";
 
 /** A comment being written: the layer it is for and where on the canvas it was started. */
 export interface Draft {
@@ -32,6 +34,10 @@ export interface ViewerState {
   /** Zoom in whole percent. */
   zoom: number;
   draft: Draft | null;
+  /** In play mode, whether the pointer is over a layer with an onClick. */
+  clickable: boolean;
+  /** A short message shown over the canvas, e.g. why a click did nothing. */
+  notice: string | null;
 }
 
 export interface StageElements {
@@ -68,6 +74,8 @@ export class Viewer {
     tool: "select",
     zoom: 100,
     draft: null,
+    clickable: false,
+    notice: null,
   });
   private createBackend: StageBackendFactory;
   private host: DesignHost;
@@ -79,6 +87,7 @@ export class Viewer {
   private buildErrors: Diagnostic[] = [];
   private typeErrors: Diagnostic[] = [];
   private rawComments: Comment[] = [];
+  private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(engine: RenderEngine, createBackend: StageBackendFactory) {
     this.createBackend = createBackend;
@@ -136,10 +145,23 @@ export class Viewer {
     return [...this.typeErrors, ...this.buildErrors, ...this.host.diagnostics];
   }
 
+  /**
+   * Comments matched against the current trees. Comments are about an
+   * artboard's initial state, so a modified artboard keeps the matches it had
+   * before it was changed.
+   */
   private resolvedComments(): ResolvedComment[] {
     const roots = new Map<string, SceneNode>();
-    for (const f of this.host.frames) if (f.root) roots.set(f.name, f.root);
-    return this.rawComments.map((c) => resolveComment(c, roots.get(c.frame)));
+    const modified = new Set<string>();
+    for (const f of this.host.frames) {
+      if (f.root) roots.set(f.name, f.root);
+      if (f.modified) modified.add(f.name);
+    }
+    const before = new Map(this.store.get().comments.map((c) => [c.id, c]));
+    return this.rawComments.map((c) => {
+      const kept = modified.has(c.frame) ? before.get(c.id) : undefined;
+      return kept ? { ...kept, ...c } : resolveComment(c, roots.get(c.frame));
+    });
   }
 
   private syncScene() {
@@ -162,7 +184,7 @@ export class Viewer {
       comments: this.resolvedComments(),
       selected,
       hovered: keep(prev.hovered),
-      draft: prev.draft && model.nodes.has(prev.draft.key) ? prev.draft : null,
+      draft: prev.draft && model.nodes.get(prev.draft.key)?.frame.modified === false ? prev.draft : null,
     });
     this.syncHighlight();
     if (first) renderer.fit();
@@ -215,21 +237,62 @@ export class Viewer {
   }
 
   hoverAt(screen: Point) {
-    this.hover(this.renderer?.hitTest(screen)?.key ?? null);
+    const node = this.renderer?.hitTest(screen) ?? null;
+    if (this.store.get().tool === "play") {
+      // Play mode shows the design as a user would see it: no outlines, a hand over clickable layers.
+      const clickable = !!clickHandler(node);
+      if (clickable !== this.store.get().clickable) this.store.set({ clickable });
+      return;
+    }
+    this.hover(node?.key ?? null);
   }
 
   clickAt(screen: Point) {
-    if (this.store.get().tool === "comment") this.startComment(screen);
+    const tool = this.store.get().tool;
+    if (tool === "comment") this.startComment(screen);
+    else if (tool === "play") this.play(screen);
     else this.select(this.renderer?.hitTest(screen)?.key ?? null);
   }
 
   cancel() {
-    if (this.store.get().tool === "comment") this.setTool("select");
+    if (this.store.get().tool !== "select") this.setTool("select");
     else this.select(null);
   }
 
   setTool(tool: Tool) {
-    this.store.set({ tool, draft: tool === "select" ? null : this.store.get().draft });
+    this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false });
+    if (tool === "play") this.hover(null);
+  }
+
+  /** Shows a short message over the canvas for a few seconds. */
+  notify(notice: string) {
+    clearTimeout(this.noticeTimer);
+    this.store.set({ notice });
+    this.noticeTimer = setTimeout(() => this.store.set({ notice: null }), 3500);
+  }
+
+  // ------------------------------------------------------------------- states
+
+  /** Runs the onClick of the innermost clickable layer at a screen point. */
+  private play(screen: Point) {
+    const node = this.renderer?.hitTest(screen) ?? null;
+    const handler = clickHandler(node);
+    if (node && handler) this.host.click(node.frame.name, handler);
+  }
+
+  /** Switches one of an artboard's variants; the artboard re-renders through React. */
+  setVariant(frame: string, name: string, value: VariantValue) {
+    const f = this.host.frames.find((f) => f.name === frame);
+    try {
+      f?.variants.set(name, value);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  /** Puts an artboard back in its initial state. */
+  resetFrame(frame: string) {
+    void this.host.reset(frame);
   }
 
   // ----------------------------------------------------------------- comments
@@ -239,6 +302,10 @@ export class Viewer {
     const renderer = this.renderer;
     const node = renderer?.hitTest(screen);
     if (!renderer || !node) return;
+    if (node.frame.modified) {
+      this.notify(`${node.frame.name} is not in its initial state. Reset it to comment.`);
+      return;
+    }
     this.store.set({ draft: { key: node.key, at: renderer.toWorld(screen) } });
     this.select(node.key);
   }

@@ -19,6 +19,7 @@ type PropType =
   | { kind: "fontFamily" }
   | { kind: "shadow" }
   | { kind: "viewBox" }
+  | { kind: "handler" }
   | { kind: "enum"; values: readonly string[] }
   | { kind: "children"; of: "nodes" | "text" | "runs" };
 
@@ -58,6 +59,10 @@ const box = {
   opacity: num("Opacity of the element and everything inside it, 0..1.", "1", 0, 1),
   rotation: { type: { kind: "number", min: -Infinity }, doc: "Clockwise rotation in degrees around the centre. Paint only: layout uses the unrotated box.", default: "0" },
   name: { type: { kind: "string" }, doc: "Layer name shown in inspect output and diagnostics." },
+  onClick: {
+    type: { kind: "handler" },
+    doc: "Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking.",
+  },
 } satisfies Record<string, PropDef>;
 
 const fillProp: PropDef = { type: { kind: "fill" }, doc: "Background: a color or a gradient `{ type: \"linear\" | \"radial\", stops, ... }`." };
@@ -402,6 +407,8 @@ function describe(t: PropType, prop: string): string {
       return `one of ${knownFamilies().map((f) => JSON.stringify(f)).join(", ")} (declare others with \`defineFont\`)`;
     case "shadow":
       return 'a shadow `{ x?, y?, blur?, spread?, color? }` or array of shadows';
+    case "handler":
+      return "a function";
     case "viewBox":
       return '`[minX, minY, width, height]` or `"minX minY width height"` with positive width and height';
     case "enum":
@@ -444,6 +451,8 @@ function matches(t: PropType, v: unknown, prop: string): boolean {
       return isShadowObject(v) || (Array.isArray(v) && v.every(isShadowObject));
     case "viewBox":
       return parseViewBox(v) !== null;
+    case "handler":
+      return typeof v === "function";
     case "enum":
       return t.values.includes(NUMERIC_ENUMS.has(prop) ? String(v) : (v as string)) && (NUMERIC_ENUMS.has(prop) || typeof v === "string");
     case "children":
@@ -518,6 +527,8 @@ function tsType(t: PropType, prop: string): string {
       return "Shadow | Shadow[]";
     case "viewBox":
       return "ViewBox";
+    case "handler":
+      return "() => void";
     case "enum":
       return t.values.map((v) => (NUMERIC_ENUMS.has(prop) ? v : JSON.stringify(v))).join(" | ");
     case "children":
@@ -758,7 +769,22 @@ export function generateDocs(): string {
     "",
     "Options are strings, numbers or booleans. Calls with the same name in one artboard share one value",
     "and must declare the same options. Render another state with `--variant Step=2` (repeatable) on",
-    "`render`, `inspect` and `lint`; `inspect` lists each artboard's variants.",
+    "`render`, `inspect` and `lint`; `inspect` lists each artboard's variants. In the viewer, select an",
+    "artboard to switch its variants in the Properties panel.",
+    "",
+    "## Interaction",
+    "",
+    "Any layer element takes `onClick`. It runs when a reviewer clicks the layer in the viewer's Play mode",
+    "(P); the innermost layer with a handler under the pointer wins. Screenshots, `inspect` and `lint`",
+    "always show the state before any click. Keep a state that matters for review in a variant, so it",
+    "can be picked without clicking and rendered from the CLI:",
+    "",
+    "```tsx",
+    'const [tab, setTab] = useVariant("Tab", ["Orders", "Favourites"]);',
+    '<Text onClick={() => setTab("Favourites")}>Favourites</Text>',
+    "```",
+    "",
+    "Use `useState` for state nobody needs to review on its own, such as a toggle's pressed look.",
     "",
     "## Commands",
     "",

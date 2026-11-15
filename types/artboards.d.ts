@@ -121,6 +121,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Background: a color or a gradient `{ type: "linear" | "radial", stops, ... }`. */
     fill?: Fill;
     /** Border color or gradient. */
@@ -184,6 +186,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Background: a color or a gradient `{ type: "linear" | "radial", stops, ... }`. */
     fill?: Fill;
     /** Border color or gradient. */
@@ -257,6 +261,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Background: a color or a gradient `{ type: "linear" | "radial", stops, ... }`. */
     fill?: Fill;
     /** Border color or gradient. */
@@ -330,6 +336,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Background: a color or a gradient `{ type: "linear" | "radial", stops, ... }`. */
     fill?: Fill;
     /** Border color or gradient. */
@@ -407,6 +415,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Text color. Default #000000. */
     color?: Color;
     /** Font size in px. Default 14. */
@@ -497,6 +507,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Background: a color or a gradient `{ type: "linear" | "radial", stops, ... }`. */
     fill?: Fill;
     /** Border color or gradient. */
@@ -554,6 +566,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** Background: a color or a gradient `{ type: "linear" | "radial", stops, ... }`. */
     fill?: Fill;
     /** Border color or gradient. */
@@ -609,6 +623,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** An imported .png, .jpg, .webp or .gif file. */
     src?: ImageAsset;
     /** How the image fills its box: crop to cover, letterbox to contain, or stretch. Default "cover". */
@@ -670,6 +686,8 @@ declare module "artboards" {
     rotation?: number;
     /** Layer name shown in inspect output and diagnostics. */
     name?: string;
+    /** Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking. */
+    onClick?: () => void;
     /** SVG path data string (e.g. `"M 4 12 L 10 18 L 20 6"`). */
     d: string;
     /** Coordinate system `[minX, minY, width, height]` or `"minX minY width height"` mapped into the box. */

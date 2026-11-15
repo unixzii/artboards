@@ -5,6 +5,7 @@ import {
   MessageSquarePlus,
   Minus,
   MousePointer2,
+  MousePointerClick,
   Plus,
   TriangleAlert,
 } from "lucide-react";
@@ -33,6 +34,9 @@ export function Toolbar() {
         </GroupButton>
         <GroupButton id="tool-comment" title="Add a comment (C)" active={tool === "comment"} onClick={() => viewer.setTool("comment")}>
           <MessageSquarePlus size={13} />
+        </GroupButton>
+        <GroupButton id="tool-play" title="Play: click layers to run their onClick (P)" active={tool === "play"} onClick={() => viewer.setTool("play")}>
+          <MousePointerClick size={13} />
         </GroupButton>
       </ButtonGroup>
       <span className="spacer" />

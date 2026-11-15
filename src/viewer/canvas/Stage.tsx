@@ -2,12 +2,33 @@
 // the comment box). Overlay elements are anchored to canvas points with CSS
 // variables, so they follow pan and zoom without React re-rendering.
 
-import { Component, TriangleAlert } from "lucide-react";
+import { Component, RotateCcw, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useViewer, useViewerState } from "../core/context.ts";
 import { describe, pinPosition, type ViewFrame } from "../core/model.ts";
 import { anchor } from "./anchor.ts";
 import { attachInput } from "./input.ts";
+
+/** "Modified" with a reset button, on an artboard that is not in its initial state. */
+function ModifiedBadge({ frame }: { frame: ViewFrame }) {
+  const viewer = useViewer();
+  if (!frame.modified) return null;
+  return (
+    <span className="modified">
+      Modified
+      <button
+        type="button"
+        title="Reset to the initial state"
+        onClick={(e) => {
+          e.stopPropagation();
+          viewer.resetFrame(frame.name);
+        }}
+      >
+        <RotateCcw size={11} />
+      </button>
+    </span>
+  );
+}
 
 function FrameLabel({ frame }: { frame: ViewFrame }) {
   const viewer = useViewer();
@@ -20,6 +41,7 @@ function FrameLabel({ frame }: { frame: ViewFrame }) {
         <span className="failed-head">
           <TriangleAlert size={13} />
           <span>{frame.name}</span>
+          <ModifiedBadge frame={frame} />
         </span>
         <span className="err">
           {error.source} {error.message}
@@ -35,6 +57,7 @@ function FrameLabel({ frame }: { frame: ViewFrame }) {
       onClick={() => viewer.select(root.key)}
     >
       {frame.name}&nbsp;&nbsp;{frame.w} × {frame.h}
+      <ModifiedBadge frame={frame} />
     </div>
   );
 }
@@ -44,7 +67,7 @@ function Pins() {
   const model = useViewerState((s) => s.model);
   const comments = useViewerState((s) => s.comments);
   return comments
-    .filter((c) => !c.resolved)
+    .filter((c) => !c.resolved && !model.frames.find((f) => f.name === c.frame)?.modified)
     .map((comment) => {
       const at = pinPosition(comment, model);
       return (
@@ -61,6 +84,11 @@ function Pins() {
         )
       );
     });
+}
+
+function Notice() {
+  const notice = useViewerState((s) => s.notice);
+  return notice ? <div id="notice">{notice}</div> : null;
 }
 
 function CommentBox() {
@@ -114,6 +142,7 @@ export function Stage() {
   const viewer = useViewer();
   const ready = useViewerState((s) => s.ready);
   const tool = useViewerState((s) => s.tool);
+  const clickable = useViewerState((s) => s.clickable);
   const frames = useViewerState((s) => s.model.frames);
   const stage = useRef<HTMLElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -130,7 +159,7 @@ export function Stage() {
   }, [viewer]);
 
   return (
-    <main id="stage" ref={stage} className={tool === "comment" ? "commenting" : undefined}>
+    <main id="stage" ref={stage} className={tool === "comment" ? "commenting" : tool === "play" ? `playing${clickable ? " clickable" : ""}` : undefined}>
       <canvas id="canvas" ref={canvas} />
       <div id="overlay" ref={overlay}>
         {frames.map((frame) => (
@@ -139,6 +168,7 @@ export function Stage() {
         <Pins />
         <CommentBox />
       </div>
+      <Notice />
       {!ready && <div id="boot">Loading…</div>}
     </main>
   );

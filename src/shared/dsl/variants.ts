@@ -29,11 +29,14 @@ export class VariantStore {
   private entries = new Map<string, Entry>();
   /** Values given before rendering (e.g. `--variant name=value`), matched as `String(option)`. */
   private presets = new Map<string, string>();
+  /** Values kept from an earlier store (the viewer across code edits); ignored once no longer an option. */
+  private remembered = new Map<string, VariantValue>();
   /** Every name a render asked for, including declarations that threw. */
   private names = new Set<string>();
 
-  constructor(presets: Iterable<[string, string]> = []) {
+  constructor(presets: Iterable<[string, string]> = [], remembered: Iterable<[string, VariantValue]> = []) {
     for (const [name, raw] of presets) this.presets.set(name, raw);
+    for (const [name, value] of remembered) this.remembered.set(name, value);
   }
 
   /** Registers a variant while rendering. Throws when it contradicts an earlier declaration. */
@@ -73,6 +76,9 @@ export class VariantStore {
       const hit = options.find((o) => String(o) === raw);
       if (hit === undefined) throw new DslError(`Variant ${show(name)} has no option ${show(raw)}. Options: ${showAll(options)}.`);
       value = hit;
+    } else if (this.remembered.has(name)) {
+      const kept = this.remembered.get(name);
+      if (options.some((o) => Object.is(o, kept))) value = kept as VariantValue;
     }
     this.entries.set(name, { name, options: [...options], initial: initial as VariantValue, value, refs: 0, listeners: new Set() });
   }
@@ -112,6 +118,11 @@ export class VariantStore {
   /** Variants currently rendered, in the order they were first declared. */
   list(): VariantInfo[] {
     return [...this.entries.values()].filter((e) => e.refs > 0).map(({ name, options, initial, value }) => ({ name, options, initial, value }));
+  }
+
+  /** Values that differ from their initial value, including variants not rendered right now. */
+  overrides(): [string, VariantValue][] {
+    return [...this.entries.values()].filter((e) => !Object.is(e.value, e.initial)).map((e) => [e.name, e.value]);
   }
 
   /** Whether any render of this artboard has declared the name, even if the declaration failed. */

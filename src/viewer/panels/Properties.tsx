@@ -1,9 +1,10 @@
-import { Check, Component, Copy } from "lucide-react";
+import { Check, Component, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Empty, LinkButton } from "../components/primitives.tsx";
+import { ButtonGroup, Empty, GroupButton, LinkButton } from "../components/primitives.tsx";
 import { Section } from "../components/Section.tsx";
 import { useViewer, useViewerState } from "../core/context.ts";
-import { enclosingComponent, type ViewNode } from "../core/model.ts";
+import { enclosingComponent, type ViewFrame, type ViewNode } from "../core/model.ts";
+import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import { gradientStops } from "../../shared/paint.ts";
 import { isAssetRef, type Gradient } from "../../shared/scene.ts";
 import { LayerIcon } from "./LayerIcon.tsx";
@@ -83,6 +84,14 @@ function PropRow({ name, value }: { name: string; value: unknown }) {
       </div>
     );
   }
+  if (typeof value === "function") {
+    return (
+      <div className="row">
+        <span className="k">{name}</span>
+        <span className="v">function</span>
+      </div>
+    );
+  }
   const isColor = typeof value === "string" && (COLOR_PROPS.has(name) || COLOR_VALUE.test(value.trim()));
   return (
     <div className="row">
@@ -112,6 +121,63 @@ function SourceCopy({ source }: { source: string }) {
       <span>{source}</span>
       {copied ? <Check size={11} /> : <Copy size={11} />}
     </LinkButton>
+  );
+}
+
+/** Segmented buttons for a few short options, a menu otherwise. */
+function VariantPicker({ frame, variant }: { frame: string; variant: VariantInfo }) {
+  const viewer = useViewer();
+  const labels = variant.options.map(String);
+  const pick = (i: number) => viewer.setVariant(frame, variant.name, variant.options[i]);
+  const current = variant.options.findIndex((o) => Object.is(o, variant.value));
+  const title = (i: number) => (Object.is(variant.options[i], variant.initial) ? `${labels[i]} (initial)` : labels[i]);
+  if (labels.length <= 5 && labels.join("").length <= 24) {
+    return (
+      <ButtonGroup label={variant.name}>
+        {labels.map((label, i) => (
+          <GroupButton key={label} title={title(i)} active={i === current} onClick={() => pick(i)}>
+            {label}
+          </GroupButton>
+        ))}
+      </ButtonGroup>
+    );
+  }
+  return (
+    <select aria-label={variant.name} value={current} onChange={(e) => pick(Number(e.target.value))}>
+      {labels.map((label, i) => (
+        <option key={label} value={i}>
+          {title(i)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** The artboard's variants, shown when its root is selected. */
+function Variants({ frame }: { frame: ViewFrame }) {
+  const viewer = useViewer();
+  if (frame.variants.length === 0 && !frame.modified) return null;
+  return (
+    <div className="variants">
+      <div className="variants-head">
+        <span>Variants</span>
+        {frame.modified && (
+          <LinkButton title="Reset every variant and clicked state" onClick={() => viewer.resetFrame(frame.name)}>
+            <RotateCcw size={11} />
+            <span>Reset</span>
+          </LinkButton>
+        )}
+      </div>
+      {frame.variants.map((v) => (
+        <div className="variant" key={v.name}>
+          <span className="k" title={v.name}>
+            {v.name}
+          </span>
+          <VariantPicker frame={frame.name} variant={v} />
+        </div>
+      ))}
+      {frame.variants.length === 0 && <div className="variants-note">Changed by clicks in Play mode.</div>}
+    </div>
   );
 }
 
@@ -154,6 +220,7 @@ function Inspector({ node }: { node: ViewNode }) {
         <Metric label="W" value={node.layout.width} />
         <Metric label="H" value={node.layout.height} />
       </div>
+      {!node.parent && <Variants frame={node.frame} />}
       {node.type === "Text" && <div className="text-content">{String(node.props.children ?? "")}</div>}
       {props.length > 0 && (
         <div className="rows">

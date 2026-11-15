@@ -1,5 +1,5 @@
 // Customer app (iPhone, 390 x 844): browse, customise, pay, track, membership.
-import { Column, Ellipse, Frame, Grid, Image, Path, Rect, Row, Span, Text, useVariant } from "artboards";
+import { Column, Ellipse, Frame, Grid, Image, Path, Rect, Row, Span, Text, useState, useVariant } from "artboards";
 import type { ReactNode } from "react";
 import {
   Avatar,
@@ -213,8 +213,17 @@ export function Home() {
 
 // ------------------------------------------------------------------ product sheet
 
+const TEMPS = [
+  ["热", "flame"],
+  ["冰", "snowflake"],
+  ["少冰", undefined],
+  ["去冰", undefined],
+] as const satisfies readonly (readonly [string, IconName | undefined])[];
+
 export function ProductSheet() {
   const p = byId.osmanthus;
+  const [size, setSize] = useState("大杯 16oz");
+  const [temp, setTemp] = useVariant("温度", TEMPS.map(([t]) => t));
   return (
     <Phone>
       <HomeBody />
@@ -250,16 +259,15 @@ export function ProductSheet() {
           </Text>
         </Column>
         <OptionGroup title="杯型">
-          <Segmented options={["中杯 12oz", "大杯 16oz", "超大杯 20oz"]} value="大杯 16oz" />
+          <Segmented options={["中杯 12oz", "大杯 16oz", "超大杯 20oz"]} value={size} onChange={setSize} />
         </OptionGroup>
         <OptionGroup title="温度">
           <Row gap={8}>
-            <Chip icon="flame" selected>
-              热
-            </Chip>
-            <Chip icon="snowflake">冰</Chip>
-            <Chip>少冰</Chip>
-            <Chip>去冰</Chip>
+            {TEMPS.map(([t, icon]) => (
+              <Chip key={t} icon={icon} selected={t === temp} onClick={() => setTemp(t)}>
+                {t}
+              </Chip>
+            ))}
           </Row>
         </OptionGroup>
         <OptionGroup title="奶基" note="燕麦奶 +¥3 已含">
@@ -283,7 +291,7 @@ export function ProductSheet() {
             <Column width="fill" gap={2}>
               <Price value={p.price} was={p.was} size={26} />
               <Text fontSize={11} color={color.muted}>
-                大杯 · 热 · 燕麦奶 · 少甜
+                {`${size.split(" ")[0]} · ${temp} · 燕麦奶 · 少甜`}
               </Text>
             </Column>
             <Stepper value={1} />
