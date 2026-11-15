@@ -360,7 +360,8 @@ svg.lucide { flex: none; display: block; }
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
-#canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* Screen-sized and pinned to the window's corner by the renderer; the stage clips it. */
+#canvas { position: absolute; left: 0; top: 0; display: block; }
 #overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; --s: 1; --tx: 0; --ty: 0; }
 
 /* Pinned to canvas point (--x, --y). The renderer updates --s/--tx/--ty on

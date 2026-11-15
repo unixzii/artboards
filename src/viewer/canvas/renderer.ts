@@ -1,6 +1,12 @@
 // Stage renderer: records per-artboard SkPictures onto the WebGL/SW CanvasKit
 // surface and manages the viewport transform. Runs every frame while panning,
 // so it stays out of React; the DOM overlay follows through CSS variables.
+//
+// The canvas is as large as the screen and pinned to the window's top-left
+// corner; the stage is a window onto it. Resizing the stage (dragging a side
+// panel, resizing the window) therefore only changes which part of the canvas
+// shows: the surface is not reallocated and the design stays where it is on
+// screen. Points passed in and out of this class are relative to the stage.
 
 import type { Canvas, CanvasKit, Paint, SkPicture, Surface } from "canvaskit-wasm";
 import type { RenderEngine } from "../../shared/engine.ts";
@@ -21,8 +27,14 @@ export class Renderer implements StageBackend {
   private model: Model = EMPTY_MODEL;
   private selected: ViewNode | null = null;
   private hovered: ViewNode | null = null;
+  /** World-to-canvas transform. */
   private view = { s: 1, tx: 0, ty: 0 };
-  private drawQueued = false;
+  /** The stage's box in canvas coordinates: the part of the canvas that shows. */
+  private viewport = { x: 0, y: 0, width: 1, height: 1 };
+  /** The viewport the last draw culled against; artboards outside it may be missing. */
+  private drawn = { x: 0, y: 0, width: 0, height: 0 };
+  private dpr = 1;
+  private frame = 0;
   private observer: ResizeObserver;
   private scheme = matchMedia("(prefers-color-scheme: dark)");
   private onZoom: (scale: number) => void;
@@ -50,15 +62,19 @@ export class Renderer implements StageBackend {
       error: stroke(220, 38, 38),
     };
 
-    this.resize();
-    this.observer = new ResizeObserver(() => this.resize());
+    this.layout();
+    this.observer = new ResizeObserver(this.layout);
     this.observer.observe(els.stage);
+    // Also catches a move to a screen with another size or pixel ratio.
+    window.addEventListener("resize", this.layout);
     this.scheme.addEventListener("change", this.requestDraw);
   }
 
   dispose() {
     this.observer.disconnect();
+    window.removeEventListener("resize", this.layout);
     this.scheme.removeEventListener("change", this.requestDraw);
+    cancelAnimationFrame(this.frame);
     this.setModel(EMPTY_MODEL);
     this.surface?.delete();
     this.surface = null;
@@ -101,11 +117,12 @@ export class Renderer implements StageBackend {
   // ----------------------------------------------------------------- viewport
 
   get size() {
-    return { width: this.els.stage.clientWidth, height: this.els.stage.clientHeight };
+    return { width: this.viewport.width, height: this.viewport.height };
   }
 
   toWorld(screen: Point): Point {
-    return { x: (screen.x - this.view.tx) / this.view.s, y: (screen.y - this.view.ty) / this.view.s };
+    const { view, viewport } = this;
+    return { x: (screen.x + viewport.x - view.tx) / view.s, y: (screen.y + viewport.y - view.ty) / view.s };
   }
 
   hitTest(screen: Point): ViewNode | null {
@@ -121,8 +138,10 @@ export class Renderer implements StageBackend {
   /** Multiplies zoom by `factor`, keeping the given screen point fixed (default: centre). */
   zoomBy(factor: number, at: Point = { x: this.size.width / 2, y: this.size.height / 2 }) {
     const s = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, this.view.s * factor));
-    this.view.tx = at.x - ((at.x - this.view.tx) * s) / this.view.s;
-    this.view.ty = at.y - ((at.y - this.view.ty) * s) / this.view.s;
+    const x = at.x + this.viewport.x;
+    const y = at.y + this.viewport.y;
+    this.view.tx = x - ((x - this.view.tx) * s) / this.view.s;
+    this.view.ty = y - ((y - this.view.ty) * s) / this.view.s;
     this.view.s = s;
     this.requestDraw();
   }
@@ -139,8 +158,8 @@ export class Renderer implements StageBackend {
     const pad = width < 600 ? 24 : 64;
     const s = Math.min(1, (width - pad * 2) / (x1 - x0), (height - pad * 2 - 24) / (y1 - y0));
     this.view.s = Math.max(MIN_ZOOM, s);
-    this.view.tx = (width - (x1 - x0) * this.view.s) / 2 - x0 * this.view.s;
-    this.view.ty = (height - (y1 - y0) * this.view.s) / 2 - y0 * this.view.s + 12;
+    this.view.tx = this.viewport.x + (width - (x1 - x0) * this.view.s) / 2 - x0 * this.view.s;
+    this.view.ty = this.viewport.y + (height - (y1 - y0) * this.view.s) / 2 - y0 * this.view.s + 12;
     this.requestDraw();
   }
 
@@ -148,8 +167,8 @@ export class Renderer implements StageBackend {
   reveal(node: ViewNode) {
     const { s, tx, ty } = this.view;
     const { width, height } = this.size;
-    const x = (node.frame.x + node.abs.x) * s + tx;
-    const y = (node.frame.y + node.abs.y) * s + ty;
+    const x = (node.frame.x + node.abs.x) * s + tx - this.viewport.x;
+    const y = (node.frame.y + node.abs.y) * s + ty - this.viewport.y;
     const w = node.layout.width * s;
     const h = node.layout.height * s;
     const dx = x + w < 40 || x > width - 40 ? width / 2 - (x + w / 2) : 0;
@@ -160,27 +179,58 @@ export class Renderer implements StageBackend {
   // ------------------------------------------------------------------ drawing
 
   private requestDraw = () => {
-    if (this.drawQueued) return;
-    this.drawQueued = true;
-    requestAnimationFrame(() => {
-      this.drawQueued = false;
-      this.draw();
-    });
+    this.frame ||= requestAnimationFrame(() => this.draw());
   };
 
-  private resize() {
-    const { canvas } = this.els;
+  /**
+   * Follows the stage's box. Runs from a ResizeObserver, i.e. after layout and
+   * before paint, so whatever it changes lands in the same frame as the resize.
+   */
+  private layout = () => {
+    const { stage, canvas } = this.els;
+    const rect = stage.getBoundingClientRect();
+    this.viewport = { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+
+    // The surface covers the screen, so it survives any resize of the stage. It
+    // is only replaced when the pixel ratio changes or the window outgrows it
+    // (another screen, a window spanning two, browser zoom).
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.round(this.size.width * dpr));
-    const h = Math.max(1, Math.round(this.size.height * dpr));
-    if (this.surface && canvas.width === w && canvas.height === h) return;
-    this.surface?.delete();
-    canvas.width = w;
-    canvas.height = h;
-    this.surface = this.ck.MakeWebGLCanvasSurface(canvas) ?? this.ck.MakeSWCanvasSurface(canvas);
+    const w = Math.ceil(Math.max(screen.width, window.innerWidth) * dpr);
+    const h = Math.ceil(Math.max(screen.height, window.innerHeight) * dpr);
+    const stale = !this.surface || dpr !== this.dpr || w > canvas.width || h > canvas.height;
+    if (stale) {
+      this.surface?.delete();
+      this.dpr = dpr;
+      canvas.width = w;
+      canvas.height = h;
+      canvas.style.width = `${w / dpr}px`;
+      canvas.style.height = `${h / dpr}px`;
+      this.surface = this.ck.MakeWebGLCanvasSurface(canvas) ?? this.ck.MakeSWCanvasSurface(canvas);
+    }
+    // Pins the canvas to the window's corner, whatever the stage's position.
+    canvas.style.transform = `translate(${-rect.left}px, ${-rect.top}px)`;
+
     // Keep the selection visible when a panel opens over part of the canvas.
     if (this.selected) this.reveal(this.selected);
-    this.requestDraw();
+
+    // Shrinking or moving within what is already drawn needs no repaint. Drawing
+    // here rather than next frame keeps a new surface from showing blank.
+    const { viewport, drawn } = this;
+    const covered =
+      viewport.x >= drawn.x &&
+      viewport.y >= drawn.y &&
+      viewport.x + viewport.width <= drawn.x + drawn.width &&
+      viewport.y + viewport.height <= drawn.y + drawn.height;
+    if (stale || this.frame || !covered) this.draw();
+    else this.syncOverlay();
+  };
+
+  /** Overlay elements position themselves from these (see .anchored in style.css). */
+  private syncOverlay() {
+    const style = this.els.overlay.style;
+    style.setProperty("--s", String(this.view.s));
+    style.setProperty("--tx", String(this.view.tx - this.viewport.x));
+    style.setProperty("--ty", String(this.view.ty - this.viewport.y));
   }
 
   private outline(canvas: Canvas, node: ViewNode, paint: Paint, width: number) {
@@ -194,9 +244,11 @@ export class Renderer implements StageBackend {
   }
 
   private draw() {
-    const { ck, surface, view, paints } = this;
+    const { ck, surface, view, paints, dpr } = this;
+    cancelAnimationFrame(this.frame);
+    this.frame = 0;
     if (!surface) return;
-    const dpr = window.devicePixelRatio || 1;
+    this.drawn = this.viewport;
     const canvas = surface.getCanvas();
     canvas.clear(this.scheme.matches ? ck.Color(30, 30, 33) : ck.Color(236, 236, 239));
     canvas.save();
@@ -204,7 +256,7 @@ export class Renderer implements StageBackend {
     canvas.translate(view.tx, view.ty);
     canvas.scale(view.s, view.s);
 
-    // Only artboards that intersect the viewport are replayed.
+    // Only artboards that intersect the visible part of the canvas are replayed.
     const min = this.toWorld({ x: 0, y: 0 });
     const max = this.toWorld({ x: this.size.width, y: this.size.height });
     for (const f of this.model.frames) {
@@ -232,11 +284,7 @@ export class Renderer implements StageBackend {
     canvas.restore();
     surface.flush();
 
-    // Overlay elements position themselves from these (see .anchored in style.css).
-    const style = this.els.overlay.style;
-    style.setProperty("--s", String(view.s));
-    style.setProperty("--tx", String(view.tx));
-    style.setProperty("--ty", String(view.ty));
+    this.syncOverlay();
     this.onZoom(view.s);
   }
 }
