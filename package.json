@@ -1,8 +1,8 @@
 {
-  "name": "artboards",
-  "private": true,
+  "name": "artboards-design",
   "type": "module",
   "version": "0.0.0",
+  "license": "MIT",
   "bin": {
     "artboards": "./dist/cli.js"
   },
