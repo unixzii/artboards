@@ -1,4 +1,4 @@
-// Generated from src/engine/dsl/schema.ts by `artboards types`. Do not edit.
+// Generated from src/shared/dsl/schema.ts by `artboards types`. Do not edit.
 
 declare module "artboards" {
   import type { ReactNode } from "react";

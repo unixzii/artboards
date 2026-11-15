@@ -1,8 +1,9 @@
-// View model: the server's scene turned into linked nodes placed on the
-// canvas, plus the geometry queries on it. No rendering, no DOM.
+// View model: the live scene trees turned into linked nodes placed on the
+// canvas, plus the geometry queries on them. No rendering, no DOM.
 
-import type { FramePayload, ResolvedComment, ScenePayload, SerializedNode } from "../../shared/protocol.ts";
-import { layerHint, type PaintableNode } from "../../shared/scene.ts";
+import type { Diagnostic } from "../../shared/diagnostics.ts";
+import type { ResolvedComment } from "../../shared/protocol.ts";
+import { layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   /** "<artboard>/<path>", stable across rebuilds. */
@@ -17,9 +18,15 @@ export interface ViewNode extends PaintableNode {
   parent: ViewNode | null;
 }
 
+export interface LiveFrameInput {
+  name: string;
+  root: SceneNode | null;
+  error?: Diagnostic;
+}
+
 export interface ViewFrame {
   name: string;
-  payload: FramePayload;
+  error?: Diagnostic;
   /** Null when the artboard failed to build. */
   root: ViewNode | null;
   /** Position and size on the canvas. */
@@ -88,45 +95,49 @@ const ROW_WIDTH = 6000;
 /** Placeholder size for an artboard that failed to build. */
 const FAILED = { w: 480, h: 200 };
 
-function hydrate(s: SerializedNode, frame: ViewFrame, path: string, parent: ViewNode | null, nodes: Model["nodes"]): ViewNode {
+function hydrate(n: SceneNode, frame: ViewFrame, path: string, parent: ViewNode | null, nodes: Model["nodes"]): ViewNode {
   // The artboard root sits at its frame's origin, whatever x/y it was given.
-  const layout = parent ? s.layout : { ...s.layout, x: 0, y: 0 };
+  const layout = parent ? n.layout : { ...n.layout, x: 0, y: 0 };
+  const { children: _children, ...props } = n.props;
+  if (n.type === "Text") props.children = textContentOf(n);
   const node: ViewNode = {
-    type: s.type,
-    props: s.props,
+    type: n.type,
+    props,
     layout,
-    component: s.component,
-    fontFamilies: s.fontFamilies,
-    runs: s.runs,
+    component: n.component,
+    paragraph: n.paragraph,
+    fontFamilies: n.fontFamilies,
+    runs: n.runs,
+    missingGlyphs: n.missingGlyphs,
     children: [],
     parent,
     key: nodeKey(frame.name, path),
     path,
     frame,
     abs: { x: (parent?.abs.x ?? 0) + layout.x, y: (parent?.abs.y ?? 0) + layout.y },
-    matrix: multiply(parent?.matrix ?? IDENTITY, placement(layout, s.props.rotation)),
+    matrix: multiply(parent?.matrix ?? IDENTITY, placement(layout, n.props.rotation)),
   };
-  node.children = s.children.map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes));
+  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes));
   nodes.set(node.key, node);
   return node;
 }
 
-/** Links the payload's trees and places artboards left to right, wrapping into rows. */
-export function buildModel(scene: ScenePayload): Model {
+/** Links live artboard trees and places artboards left to right, wrapping into rows. */
+export function buildModel(inputs: LiveFrameInput[]): Model {
   const nodes: Model["nodes"] = new Map();
   let x = 0;
   let y = 0;
   let rowHeight = 0;
-  const frames = (scene.frames ?? []).map((payload) => {
-    const w = payload.root?.layout.width ?? FAILED.w;
-    const h = payload.root?.layout.height ?? FAILED.h;
+  const frames = inputs.map((input) => {
+    const w = input.root?.layout.width ?? FAILED.w;
+    const h = input.root?.layout.height ?? FAILED.h;
     if (x > 0 && x + w > ROW_WIDTH) {
       x = 0;
       y += rowHeight + GAP + 40;
       rowHeight = 0;
     }
-    const frame: ViewFrame = { name: payload.name, payload, root: null, x, y, w, h };
-    if (payload.root) frame.root = hydrate(payload.root, frame, "", null, nodes);
+    const frame: ViewFrame = { name: input.name, error: input.error, root: null, x, y, w, h };
+    if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);
     return frame;

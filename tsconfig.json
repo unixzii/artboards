@@ -1,9 +1,10 @@
 {
-  // Node side: shared contracts, engine, review server, and CLI. No DOM types, so browser globals are errors here.
+  // Node side: shared contracts and CLI. No DOM types, so browser globals are errors here.
   "compilerOptions": {
     "target": "esnext",
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "resolveJsonModule": true,
     "lib": ["esnext"],
     "strict": true,
     "noEmit": true,
@@ -12,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/shared", "src/engine", "src/server", "src/cli"]
+  "include": ["src/shared", "src/cli"]
 }

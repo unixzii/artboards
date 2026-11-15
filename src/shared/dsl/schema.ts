@@ -1,8 +1,8 @@
 // Single source of truth for the DSL: runtime validation, the generated
 // `types/artboards.d.ts`, and the `artboards docs` reference all come from here.
 
-import { isAssetRef, parseViewBox } from "../../shared/scene.ts";
 import { builtinFamilies, knownFamilies } from "../fonts.ts";
+import { isAssetRef, parseViewBox } from "../scene.ts";
 
 type PropType =
   | { kind: "number"; min?: number; max?: number; integer?: boolean }
@@ -531,7 +531,7 @@ const FONT_EXTS = [".woff2", ".ttf", ".otf"];
 
 export function generateDts(): string {
   const out: string[] = [
-    "// Generated from src/engine/dsl/schema.ts by `artboards types`. Do not edit.",
+    "// Generated from src/shared/dsl/schema.ts by `artboards types`. Do not edit.",
     "",
     'declare module "artboards" {',
     '  import type { ReactNode } from "react";',

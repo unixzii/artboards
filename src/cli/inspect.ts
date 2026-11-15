@@ -1,7 +1,7 @@
 // Text/JSON views of a laid-out tree.
 
+import type { VariantInfo, VariantValue } from "../shared/dsl/variants.ts";
 import { formatPropsSummary, layerChildren, sourceOf, textContentOf, type SceneNode } from "../shared/scene.ts";
-import type { VariantInfo, VariantValue } from "./dsl/variants.ts";
 
 const showValue = (v: VariantValue) => JSON.stringify(v);
 

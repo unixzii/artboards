@@ -1,0 +1,10 @@
+{
+  // Platform-free core shared by CLI and viewer: neither Node nor DOM globals are allowed here.
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext"],
+    "types": [],
+    "jsx": "react-jsx"
+  },
+  "include": ["."]
+}

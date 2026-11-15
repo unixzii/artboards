@@ -2,8 +2,8 @@
 // Primitives are host element types (plain strings). Their props are defined in
 // schema.ts, which also generates the type declarations agents check against.
 
-import { isAssetRef, type AssetRef } from "../../shared/scene.ts";
 import { builtinFamilies, declareFont, type CustomFace } from "../fonts.ts";
+import { isAssetRef, type AssetRef } from "../scene.ts";
 import { DslError } from "./schema.ts";
 
 export { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "react";
@@ -42,4 +42,4 @@ export function defineFont(name: unknown, faces: unknown): string {
   return name;
 }
 
-export type { Padding, Shadow, ViewBox } from "../../shared/scene.ts";
+export type { Padding, Shadow, ViewBox } from "../scene.ts";

@@ -2,10 +2,10 @@
 // `<name>.comments.json` so the agent can read them with `artboards comments`.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { groupComponents } from "../engine/dsl/reconciler.ts";
-import { listFrames, reconcileFrame } from "../engine/pipeline.ts";
-import type { Comment, NewComment, ResolvedComment } from "../shared/protocol.ts";
-import { formatPropsSummary, layerHint, nodeAtPath, nodePath, sourceOf, textContentOf, walk, type SceneNode } from "../shared/scene.ts";
+import { resolveComment, type Comment, type NewComment, type ResolvedComment } from "../shared/comments.ts";
+import { extractFrames, reconcileFrame } from "../shared/dsl/frame.ts";
+import { groupComponents } from "../shared/dsl/reconciler.ts";
+import { loadDesign } from "./bundler.ts";
 
 export const commentsPath = (file: string) => file.replace(/\.[^./\\]+$/, "") + ".comments.json";
 
@@ -47,41 +47,15 @@ export function updateComment(file: string, id: number, change: { resolved?: boo
   return true;
 }
 
-export function describeNode(n: SceneNode): string {
-  if (n.component) {
-    const summary = formatPropsSummary(n.component.props);
-    return `<${n.component.name}${summary ? ` ${summary}` : ""}>`;
-  }
-  const detail = n.type === "Text" ? textContentOf(n).slice(0, 32) : n.props.name;
-  return `<${n.type}${detail ? ` ${JSON.stringify(detail)}` : ""}>`;
-}
-
-/**
- * Matches a comment against the current tree of its artboard.
- * The stored path wins when the layer there still looks the same; otherwise a
- * single layer with the same type and hint is taken to be the one that moved.
- */
-export function resolveComment(comment: Comment, root: SceneNode | undefined): ResolvedComment {
-  if (!root) return { ...comment, attached: false };
-  const same = (n: SceneNode) => n.type === comment.nodeType && (!comment.hint || layerHint(n) === comment.hint);
-  let node = nodeAtPath(root, comment.path);
-  if (!node || !same(node)) {
-    const candidates: SceneNode[] = [];
-    if (comment.hint) walk(root, (n) => same(n) && candidates.push(n));
-    node = candidates.length === 1 ? candidates[0] : undefined;
-  }
-  if (!node) return { ...comment, attached: false };
-  return { ...comment, path: nodePath(node), attached: true, source: sourceOf(node), target: describeNode(node) };
-}
-
 /** Matches stored comments against reconciled artboard trees without running layout or WASM. */
-export function resolveFileComments(file: string): ResolvedComment[] {
+export async function resolveFileComments(file: string): Promise<ResolvedComment[]> {
   const pending = readComments(file);
   if (pending.length === 0) return [];
 
-  let entries = new Map<string, ReturnType<typeof listFrames>[number]>();
+  let entries;
   try {
-    entries = new Map(listFrames(file).map((f) => [f.name, f]));
+    const { exports, exportOrder } = await loadDesign(file);
+    entries = new Map(extractFrames(exports, exportOrder).map((f) => [f.name, f]));
   } catch {
     return pending.map((c) => resolveComment(c, undefined));
   }

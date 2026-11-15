@@ -3,7 +3,7 @@
 import type { CanvasKit, Paragraph, TypefaceFontProvider } from "canvaskit-wasm";
 import { textRunsOf, type PaintableNode } from "./scene.ts";
 
-/** Family the viewer falls back to when a node arrives without resolved families. */
+/** Family used as fallback when no font family resolved. */
 export const BASE_FAMILY = "Inter:latin";
 
 export const WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900];
@@ -30,6 +30,8 @@ export interface FontQuery {
 
 export interface FontResolver {
   provider: TypefaceFontProvider;
+  /** Preloads the font faces needed for `text` when loading is asynchronous (browser). */
+  ensure?(text: string, query: FontQuery): Promise<unknown>;
   /** Makes the glyphs for `text` available and returns the families to use, in priority order. */
   resolve(text: string, query: FontQuery): { families: string[]; missing: string[] };
 }
@@ -73,6 +75,16 @@ function styleOf(props: Record<string, any>): RunStyle {
 
 const queryOf = (s: RunStyle): FontQuery => ({ weight: nearestWeight(s.fontWeight), italic: !!s.italic, family: s.fontFamily });
 
+/** Font queries needed by a Text node (its base line-box style and each styled run). */
+export function textQueriesOf(node: PaintableNode): { text: string; query: FontQuery }[] {
+  const base = styleOf(node.props);
+  const runs = textRunsOf(node);
+  return [
+    { text: "", query: queryOf(base) },
+    ...runs.map((run) => ({ text: run.text, query: queryOf({ ...base, ...styleOf(run.props) }) })),
+  ];
+}
+
 /** Builds (once) the paragraph for a Text node. Call `releaseParagraphs` when done. */
 export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph {
   if (node.paragraph) return node.paragraph;
@@ -82,7 +94,6 @@ export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph
   const runs = textRunsOf(node);
   const styles = runs.map((r) => ({ ...base, ...styleOf(r.props) }));
 
-  // A node that arrives already resolved (sent from the dev server) keeps its families.
   if (!node.fontFamilies) {
     const missing = new Set<string>();
     node.fontFamilies = engine.fonts.resolve("", queryOf(base)).families;

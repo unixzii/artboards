@@ -2,25 +2,25 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { checkFrame } from "../engine/checks/layout-lint.ts";
-import { ensureTypes } from "../engine/checks/typecheck.ts";
-import { generateDocs } from "../engine/dsl/schema.ts";
-import { VariantStore } from "../engine/dsl/variants.ts";
-import { formatTree, formatVariants, toJson } from "../engine/inspect.ts";
+import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
+import { generateDocs } from "../shared/dsl/schema.ts";
+import { VariantStore } from "../shared/dsl/variants.ts";
+import { checkFrame } from "../shared/layout-lint.ts";
+import { commentsPath, resolveFileComments, updateComment } from "./comments-store.ts";
+import { startDevServer } from "./dev-server.ts";
+import { formatTree, formatVariants, toJson } from "./inspect.ts";
 import {
   buildFrame,
-  errorToDiagnostic,
+  cliErrorToDiagnostics,
   lintFile,
-  listFrames,
+  loadFrames,
   pickFrames,
   unknownVariants,
   type FrameVariants,
   type VariantPresets,
-} from "../engine/pipeline.ts";
-import { renderToPng } from "../engine/skia.ts";
-import { commentsPath, resolveFileComments, updateComment } from "../server/comments.ts";
-import { startDevServer } from "../server/dev-server.ts";
-import { formatDiagnostic, type Diagnostic } from "../shared/diagnostics.ts";
+} from "./pipeline.ts";
+import { renderToPng } from "./skia.ts";
+import { ensureTypes } from "./typecheck.ts";
 
 const USAGE = `Usage:
   artboards lint    <file> [--json]                              type-check, render and check every artboard
@@ -100,7 +100,7 @@ async function main(): Promise<number> {
       console.log(ok ? `Resolved comment #${values.resolve}.` : `No comment #${values.resolve} in ${commentsPath(file)}.`);
       return ok ? 0 : 1;
     }
-    const comments = resolveFileComments(file).filter((c) => values.all || !c.resolved);
+    const comments = (await resolveFileComments(file)).filter((c) => values.all || !c.resolved);
     if (values.json) {
       console.log(JSON.stringify(comments, null, 2));
       return 0;
@@ -128,10 +128,13 @@ async function main(): Promise<number> {
   }
 
   let frames;
+  let design;
   try {
-    frames = pickFrames(listFrames(file), values.frame, file);
+    const loaded = await loadFrames(file);
+    design = loaded.design;
+    frames = pickFrames(loaded.frames, values.frame, file);
   } catch (e) {
-    report([errorToDiagnostic(e, file)]);
+    report(cliErrorToDiagnostics(e, design));
     return 1;
   }
   if (values.out && frames.length > 1) {
@@ -150,7 +153,7 @@ async function main(): Promise<number> {
       built = await buildFrame(frame, { variants: record.store });
       record.rendered = built.variants.list();
     } catch (e) {
-      report([errorToDiagnostic(e, file, frame.name)]);
+      report(cliErrorToDiagnostics(e, design, frame.name));
       failed = true;
       continue;
     }

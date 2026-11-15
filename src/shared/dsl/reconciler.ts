@@ -3,7 +3,7 @@
 import { isValidElement, type ReactNode } from "react";
 import Reconciler from "react-reconciler";
 import { DefaultEventPriority } from "react-reconciler/constants.js";
-import { COMPONENT_TYPE, createNode, layerChildren, type Box, type ComponentInfo, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, createNode, layerChildren, type Box, type ComponentInfo, type SceneNode } from "../scene.ts";
 import { componentSourceOf } from "./jsx-runtime.ts";
 import { DslError, validateProps } from "./schema.ts";
 import { VariantContext } from "./variants.ts";
@@ -100,21 +100,38 @@ function captureComponentStack(hostFiber: any): ComponentInfo[] | undefined {
   return stack.length > 0 ? stack.reverse() : undefined;
 }
 
+/** Drops cached Skia paragraph and runs on the enclosing <Text> when its content or style mutates. */
+function invalidateText(node: SceneNode | null) {
+  for (let n = node; n; n = n.parent) {
+    if (n.type === "Text") {
+      n.paragraph?.delete();
+      n.paragraph = undefined;
+      n.runs = undefined;
+      n.fontFamilies = undefined;
+      n.missingGlyphs = undefined;
+      break;
+    }
+  }
+}
+
 function append(parent: SceneNode, child: SceneNode) {
   detach(child);
   child.parent = parent;
   parent.children.push(child);
+  invalidateText(parent);
 }
 
 function insertBefore(parent: SceneNode, child: SceneNode, before: SceneNode) {
   detach(child);
   child.parent = parent;
   parent.children.splice(parent.children.indexOf(before), 0, child);
+  invalidateText(parent);
 }
 
 function detach(child: SceneNode) {
   const p = child.parent;
   if (!p) return;
+  invalidateText(p);
   const i = p.children.indexOf(child);
   if (i >= 0) p.children.splice(i, 1);
   child.parent = null;
@@ -127,6 +144,7 @@ interface HostContext {
 }
 
 let currentPriority = 0;
+const commitListeners = new WeakMap<SceneNode, () => void>();
 
 const hostConfig: any = {
   supportsMutation: true,
@@ -182,14 +200,20 @@ const hostConfig: any = {
     validateProps(type, next);
     instance.props = next;
     instance.componentStack = captureComponentStack(fiber);
+    invalidateText(instance);
   },
   commitTextUpdate(instance: SceneNode, _old: string, next: string) {
     instance.text = next;
+    invalidateText(instance);
   },
-  resetTextContent() {},
+  resetTextContent(instance: SceneNode) {
+    invalidateText(instance);
+  },
 
   prepareForCommit: () => null,
-  resetAfterCommit() {},
+  resetAfterCommit(root: SceneNode) {
+    commitListeners.get(root)?.();
+  },
   preparePortalMount() {},
   detachDeletedInstance() {},
   getInstanceFromNode: () => null,
@@ -198,10 +222,10 @@ const hostConfig: any = {
   prepareScopeUpdate() {},
   getInstanceFromScope: () => null,
 
-  scheduleTimeout: setTimeout,
-  cancelTimeout: clearTimeout,
+  scheduleTimeout: (globalThis as any).setTimeout,
+  cancelTimeout: (globalThis as any).clearTimeout,
   noTimeout: -1,
-  scheduleMicrotask: queueMicrotask,
+  scheduleMicrotask: (globalThis as any).queueMicrotask,
   supportsMicrotasks: true,
 
   setCurrentUpdatePriority(p: number) {
@@ -233,12 +257,26 @@ export interface SceneRoot {
   unmount(): void;
 }
 
-export function createSceneRoot(): SceneRoot {
+export interface SceneRootOptions {
+  /** Called when React commits an internal state/effect update outside `render()` / `unmount()`. */
+  onCommit?: () => void;
+  /** Called when an asynchronous React render throws outside synchronous `render()`. */
+  onError?: (error: unknown) => void;
+}
+
+export function createSceneRoot(opts: SceneRootOptions = {}): SceneRoot {
   const root = createNode("#root", {});
   let error: unknown;
-  const onError = (e: unknown) => {
-    error ??= e;
+  let inSyncCall = false;
+  const handleError = (e: unknown) => {
+    if (inSyncCall) error ??= e;
+    else opts.onError?.(e);
   };
+  if (opts.onCommit) {
+    commitListeners.set(root, () => {
+      if (!inSyncCall) opts.onCommit!();
+    });
+  }
   const container = (reconciler as any).createContainer(
     root,
     1, // ConcurrentRoot
@@ -246,19 +284,31 @@ export function createSceneRoot(): SceneRoot {
     false,
     null,
     "",
-    onError,
-    onError,
-    onError,
+    handleError,
+    handleError,
+    handleError,
     () => {},
     null,
   );
   const update = (element: ReactNode) => {
     error = undefined;
-    (reconciler as any).updateContainerSync(element, container, null, null);
-    (reconciler as any).flushSyncWork();
+    inSyncCall = true;
+    try {
+      (reconciler as any).updateContainerSync(element, container, null, null);
+      (reconciler as any).flushSyncWork();
+    } finally {
+      inSyncCall = false;
+    }
     if (error) throw error;
   };
-  return { root, render: update, unmount: () => update(null) };
+  return {
+    root,
+    render: update,
+    unmount: () => {
+      commitListeners.delete(root);
+      update(null);
+    },
+  };
 }
 
 // ------------------------------------------------------------------ layer tree

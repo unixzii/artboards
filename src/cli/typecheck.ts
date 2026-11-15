@@ -1,18 +1,18 @@
 // Type-checks a DSL file against the generated declarations by running tsc.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Diagnostic } from "../../shared/diagnostics.ts";
-import { generateDts } from "../dsl/schema.ts";
+import type { Diagnostic } from "../shared/diagnostics.ts";
+import { generateDts } from "../shared/dsl/schema.ts";
 
 const require = createRequire(import.meta.url);
 
 // Lives inside the package so its `import "react"` resolves to our @types/react.
-export const DTS_PATH = fileURLToPath(new URL("../../../types/artboards.d.ts", import.meta.url));
+export const DTS_PATH = fileURLToPath(new URL("../../types/artboards.d.ts", import.meta.url));
 
 /** Writes the declaration file if it is missing or out of date. */
 export function ensureTypes(): string {
@@ -24,7 +24,7 @@ export function ensureTypes(): string {
   return DTS_PATH;
 }
 
-export function typecheck(file: string): Diagnostic[] {
+export async function typecheck(file: string): Promise<Diagnostic[]> {
   const tsPkg = require.resolve("typescript/package.json");
   const tsc = join(dirname(tsPkg), require(tsPkg).bin.tsc);
   const dir = mkdtempSync(join(tmpdir(), "artboards-tsc-"));
@@ -48,8 +48,13 @@ export function typecheck(file: string): Diagnostic[] {
       files: [resolve(file), ensureTypes()],
     };
     writeFileSync(join(dir, "tsconfig.json"), JSON.stringify(config));
-    const run = spawnSync(process.execPath, [tsc, "-p", dir, "--pretty", "false"], { encoding: "utf8" });
-    const out = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+    const { status, out } = await new Promise<{ status: number | null; out: string }>((done) => {
+      const proc = spawn(process.execPath, [tsc, "-p", dir, "--pretty", "false"], { stdio: ["ignore", "pipe", "pipe"] });
+      const chunks: Buffer[] = [];
+      proc.stdout.on("data", (c) => chunks.push(c));
+      proc.stderr.on("data", (c) => chunks.push(c));
+      proc.on("close", (code) => done({ status: code, out: Buffer.concat(chunks).toString("utf8") }));
+    });
     const diagnostics: Diagnostic[] = [];
     // path(line,col): error TS1234: message   (continuation lines are indented)
     const re = /^(.+?)\((\d+),\d+\): error (TS\d+): (.*)$/;
@@ -60,13 +65,13 @@ export function typecheck(file: string): Diagnostic[] {
           severity: "error",
           rule: "type",
           message: m[4],
-          source: `${relative(process.cwd(), resolve(m[1]))}:${m[2]}`, // tsc prints paths relative to its cwd
+          source: `${relative(process.cwd(), resolve(m[1]))}:${m[2]}`,
         });
       } else if (/^\s+\S/.test(line) && diagnostics.length) {
         diagnostics[diagnostics.length - 1].message += ` ${line.trim()}`;
       }
     }
-    if (run.status !== 0 && diagnostics.length === 0 && out.trim()) {
+    if (status !== 0 && diagnostics.length === 0 && out.trim()) {
       diagnostics.push({ severity: "error", rule: "type", message: out.trim() });
     }
     return diagnostics;

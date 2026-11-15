@@ -1,12 +1,12 @@
-// JSX runtime the loader points DSL files at. Stamps host elements and tracks
+// JSX runtime DSL files compile against. Stamps host elements and tracks
 // component call-sites so inspect/lint/viewer can map both layers and component
 // instances back to source lines. React 19 dropped the `source` argument, hence
 // the wrapper.
 
-import { relative } from "node:path";
 import { jsx, jsxs } from "react/jsx-runtime";
 
 export { Fragment } from "react";
+export { jsx, jsxs };
 
 interface Source {
   fileName: string;
@@ -23,7 +23,7 @@ export function componentSourceOf(props: unknown): string | undefined {
 }
 
 export function jsxDEV(type: any, props: any, key: any, isStatic: boolean, source?: Source) {
-  const loc = source ? `${relative(process.cwd(), source.fileName)}:${source.lineNumber}` : undefined;
+  const loc = source ? `${source.fileName}:${source.lineNumber}` : undefined;
   if (typeof type === "string" && loc) {
     props = { ...props, $source: loc };
   } else if ((typeof type === "function" || (type && typeof type === "object")) && loc) {

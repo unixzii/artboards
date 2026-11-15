@@ -12,7 +12,7 @@ import { attachInput } from "./input.ts";
 function FrameLabel({ frame }: { frame: ViewFrame }) {
   const viewer = useViewer();
   const selected = useViewerState((s) => s.selected);
-  const error = frame.payload.error;
+  const error = frame.error;
   if (error) {
     // Fills the placeholder box the renderer draws for a failed artboard.
     return (

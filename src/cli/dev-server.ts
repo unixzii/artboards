@@ -1,17 +1,19 @@
-// Dev server for human review. The DSL runs, lays out and lints here; the
-// browser only paints the result and sends back review comments.
+// Dev server for human review. Compiles the DSL for the browser, runs `tsc` in
+// the background, serves fonts/WASM/imported assets, and persists review comments.
 
 import { createReadStream, existsSync, watch } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { assetPath } from "../engine/assets.ts";
-import { fontDir } from "../engine/fonts.ts";
-import { canvasKitDir } from "../engine/skia.ts";
-import type { ScenePayload } from "../shared/protocol.ts";
-import { addComment, commentsPath, updateComment } from "./comments.ts";
-import { buildScene } from "./scene-builder.ts";
+import type { Diagnostic } from "../shared/diagnostics.ts";
+import type { BuildPayload, Comment } from "../shared/protocol.ts";
+import { assetPath } from "./assets.ts";
+import { bundleDesign } from "./bundler.ts";
+import { addComment, commentsPath, readComments, updateComment } from "./comments-store.ts";
+import { fontDir } from "./fonts.ts";
+import { canvasKitDir, taffyWasmPath } from "./skia.ts";
+import { typecheck } from "./typecheck.ts";
 
 const viewerDir = fileURLToPath(new URL("../viewer/", import.meta.url));
 
@@ -80,43 +82,104 @@ export interface DevServerOptions {
 
 export async function startDevServer({ file, port, host }: DevServerOptions): Promise<string> {
   file = resolve(file);
+  const relFile = relative(process.cwd(), file);
   await bundleViewer(); // fail at startup, not on first request, if the viewer does not build
-  const streams = new Set<ServerResponse>();
-  let scene: ScenePayload | undefined;
-  let building: Promise<void> | undefined;
-  let stale = false;
 
-  // One build at a time; a change during a build triggers exactly one more.
+  const streams = new Set<ServerResponse>();
+  const broadcast = (event: string, payload: unknown) => {
+    const data = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const s of streams) s.write(data);
+  };
+
+  let version: number | null = null;
+  let seq = 0;
+  let designCode = "";
+  let buildErrors: Diagnostic[] = [];
+  let typeErrors: Diagnostic[] = [];
+  let comments: Comment[] = readComments(file);
+
+  const currentPayload = (): BuildPayload => ({
+    file: relFile,
+    version,
+    buildErrors,
+    typeErrors,
+    comments,
+  });
+
+  // Coalesced background `tsc`: never blocks serving the updated bundle.
+  let checking: Promise<void> | undefined;
+  let checkStale = false;
+  const runTypecheck = () => {
+    if (checking) {
+      checkStale = true;
+      return;
+    }
+    checking = (async () => {
+      do {
+        checkStale = false;
+        try {
+          typeErrors = await typecheck(file);
+        } catch (e) {
+          console.error("typecheck failed:", e);
+        }
+      } while (checkStale);
+      checking = undefined;
+      broadcast("typecheck", typeErrors);
+    })();
+  };
+
+  // Coalesced esbuild bundle: fast (~10ms), immediately notifies connected viewers.
+  let building: Promise<void> | undefined;
+  let buildStale = false;
   const rebuild = (): Promise<void> => {
     if (building) {
-      stale = true;
+      buildStale = true;
       return building;
     }
     building = (async () => {
       do {
-        stale = false;
-        try {
-          scene = { ...(await buildScene(file)), file: relative(process.cwd(), file) };
-        } catch (e) {
-          console.error("build failed:", e);
+        buildStale = false;
+        const out = await bundleDesign(file);
+        if (out.code !== undefined) {
+          designCode = out.code;
+          version = ++seq;
+          buildErrors = [];
+        } else {
+          version = null;
+          buildErrors = out.errors;
         }
-      } while (stale);
+        comments = readComments(file);
+      } while (buildStale);
       building = undefined;
-      const data = `event: scene\ndata: ${JSON.stringify(scene)}\n\n`;
-      for (const s of streams) s.write(data);
+      broadcast("build", currentPayload());
+      runTypecheck();
     })();
     return building;
   };
   await rebuild();
 
-  // Rebuild on any source change next to the entry file (imports are relative).
+  const refreshComments = () => {
+    comments = readComments(file);
+    broadcast("comments", comments);
+  };
+
+  // Rebuild on source/asset changes next to the entry file; reload comments on `.comments.json` changes.
   let timer: NodeJS.Timeout | undefined;
-  const comments = basename(commentsPath(file));
+  let pendingCommentsOnly = true;
+  const commentsFile = basename(commentsPath(file));
   watch(dirname(file), { recursive: true }, (_event, name) => {
     if (!name || name.includes("node_modules")) return;
-    if (!/\.(jsx|tsx|ts|js|png|jpe?g|webp|gif|woff2|ttf|otf)$/i.test(name) && basename(name) !== comments) return;
+    const isComments = basename(name) === commentsFile;
+    const isSource = /\.(jsx|tsx|ts|js|png|jpe?g|webp|gif|woff2|ttf|otf)$/i.test(name);
+    if (!isComments && !isSource) return;
+    if (isSource) pendingCommentsOnly = false;
     clearTimeout(timer);
-    timer = setTimeout(rebuild, 60);
+    timer = setTimeout(() => {
+      const onlyComments = pendingCommentsOnly;
+      pendingCommentsOnly = true;
+      if (onlyComments) refreshComments();
+      else void rebuild();
+    }, 60);
   });
 
   const server = createServer(async (req, res) => {
@@ -128,7 +191,10 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
         if (path === "/style.css") return sendFile(res, join(viewerDir, "style.css"));
         // Bundled per request (tens of ms) so viewer edits show up on reload.
         if (path === "/client.js") return send(res, 200, await bundleViewer(), TYPES[".js"]);
-        if (path === "/api/scene") return send(res, 200, scene ?? {});
+        if (path === "/design.js") {
+          return version !== null ? send(res, 200, designCode, TYPES[".js"]) : send(res, 404, "no valid build");
+        }
+        if (path === "/api/build") return send(res, 200, currentPayload());
         if (path === "/api/events") {
           res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
           res.write(": connected\n\n");
@@ -138,6 +204,7 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
         }
         let m = /^\/canvaskit\/(canvaskit\.(?:js|wasm))$/.exec(path);
         if (m) return sendFile(res, join(canvasKitDir, m[1]), true);
+        if (path === "/taffy/taffy_wasm_bg.wasm") return sendFile(res, taffyWasmPath, true);
         m = /^\/fonts\/([a-z0-9-]+)\/([a-z0-9-]+\.woff2)$/.exec(path);
         const dir = m && fontDir(m[1]);
         if (m && dir) return sendFile(res, join(dir, m[2]), true);
@@ -158,7 +225,7 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
         const body = await readJson(req);
         if (!body.text?.trim()) return send(res, 400, "text is required");
         const comment = addComment(file, body);
-        await rebuild();
+        refreshComments();
         return send(res, 200, comment);
       }
       const m = /^\/api\/comments\/(\d+)$/.exec(path);
@@ -166,7 +233,7 @@ export async function startDevServer({ file, port, host }: DevServerOptions): Pr
         const body = req.method === "PATCH" ? await readJson(req) : {};
         const ok = updateComment(file, Number(m[1]), req.method === "DELETE" ? { remove: true } : { resolved: Boolean(body.resolved) });
         if (!ok) return send(res, 404, "no such comment");
-        await rebuild();
+        refreshComments();
         return send(res, 200, { ok: true });
       }
       send(res, 404, "not found");

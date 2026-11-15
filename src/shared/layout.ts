@@ -9,7 +9,8 @@
 // Children of a plain <Frame>, and children marked `absolute`, are positioned
 // by x/y/right/bottom against the parent's outer box and take no space in flow.
 
-import {
+import type { CanvasKit } from "canvaskit-wasm";
+import initWasm, {
   AlignContent,
   AlignItems,
   AlignSelf,
@@ -20,13 +21,12 @@ import {
   Position,
   Style,
   TaffyTree,
-  loadTaffy,
+  initSync,
   type GridTemplateComponent,
-} from "taffy-layout";
-import type { CanvasKit } from "canvaskit-wasm";
-import type { RenderEngine } from "../shared/engine.ts";
-import { expandSides, layerChildren, parseViewBox, walk, type PaintableNode, type SceneNode } from "../shared/scene.ts";
-import { measureText, type Constraint } from "../shared/text.ts";
+} from "taffy-layout/wasm";
+import { prepareTree, type RenderEngine } from "./engine.ts";
+import { expandSides, layerChildren, parseViewBox, walk, type PaintableNode, type SceneNode } from "./scene.ts";
+import { measureText, type Constraint } from "./text.ts";
 
 type ParentKind = "row" | "column" | "grid" | "free";
 
@@ -180,13 +180,24 @@ function measureImage(engine: RenderEngine, node: PaintableNode, known: Constrai
 
 const LEAVES = new Set(["Text", "Path", "Image"]);
 
-let taffyReady: Promise<unknown> | undefined;
+let taffyReady: Promise<void> | undefined;
+
+/** Initializes Taffy from WASM bytes (Node) or a URL (browser). Idempotent. */
+export function initTaffy(wasm: ArrayBufferView | ArrayBuffer | string): Promise<void> {
+  return (taffyReady ??=
+    typeof wasm === "string"
+      ? initWasm({ module_or_path: wasm }).then(() => {})
+      : Promise.resolve().then(() => {
+          initSync({ module: wasm });
+        }));
+}
 
 const isAbsolute = (n: SceneNode) => n.props.absolute === true || (n.parent != null && n.parent.type !== "#root" && kindOf(n.parent) === "free");
 
 /** Lays out one artboard (a single root node) and writes `layout` on every node. */
 export async function layoutTree(root: SceneNode, engine: RenderEngine) {
-  await (taffyReady ??= loadTaffy());
+  if (!taffyReady) throw new Error("Taffy is not initialized; call initTaffy first.");
+  await Promise.all([taffyReady, prepareTree(root, engine)]);
   // Taffy resolves percentages and right/bottom insets of absolute children
   // against the wrong box, so sizes that depend on the parent are computed
   // here from the previous pass. Each pass settles one more level of nesting.

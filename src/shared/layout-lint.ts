@@ -1,10 +1,10 @@
 // Layout and legibility rules checked against a laid-out artboard.
 
-import type { Diagnostic } from "../../shared/diagnostics.ts";
-import type { RenderEngine } from "../../shared/engine.ts";
-import { expandSides, isComponentNode, nodePath, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "../../shared/scene.ts";
-import { gradientStops } from "../../shared/paint.ts";
-import { naturalTextHeight } from "../../shared/text.ts";
+import type { Diagnostic } from "./diagnostics.ts";
+import type { RenderEngine } from "./engine.ts";
+import { gradientStops } from "./paint.ts";
+import { expandSides, isComponentNode, nodePath, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "./scene.ts";
+import { naturalTextHeight } from "./text.ts";
 
 const label = (n: SceneNode) => `<${n.type}${n.props.name ? ` "${n.props.name}"` : ""}>`;
 

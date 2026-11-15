@@ -1,9 +1,12 @@
-// The viewer's controller: owns the UI state and the stage backend, and is the
-// single boundary through which UI panels and canvas input coordinate.
+// The viewer's controller: coordinates the live design host, UI state, and
+// stage backend.
 
+import { resolveComment } from "../../shared/comments.ts";
 import type { Diagnostic } from "../../shared/diagnostics.ts";
-import type { ResolvedComment, ScenePayload } from "../../shared/protocol.ts";
-import type { AssetEntry } from "../../shared/protocol.ts";
+import type { RenderEngine } from "../../shared/engine.ts";
+import type { BuildPayload, Comment, ResolvedComment } from "../../shared/protocol.ts";
+import type { SceneNode } from "../../shared/scene.ts";
+import { DesignHost } from "../runtime/host.ts";
 import * as api from "./api.ts";
 import { buildModel, describe, EMPTY_MODEL, nodeKey, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
@@ -39,8 +42,6 @@ export interface StageElements {
 
 /** Imperative stage renderer contract implemented by the CanvasKit surface. */
 export interface StageBackend {
-  /** Fetches fonts and images not seen before. Await before setModel. */
-  loadAssets(assets: AssetEntry[]): Promise<unknown>;
   setModel(model: Model): void;
   setHighlight(selected: ViewNode | null, hovered: ViewNode | null): void;
   toWorld(screen: Point): Point;
@@ -69,27 +70,59 @@ export class Viewer {
     draft: null,
   });
   private createBackend: StageBackendFactory;
+  private host: DesignHost;
   private renderer: StageBackend | null = null;
   /** Whether the view has been fitted to the first scene that had artboards. */
   private fitted = false;
-  /** Scenes are applied in arrival order, even while one is still loading fonts. */
-  private queue: Promise<void> = Promise.resolve();
+  private file = "";
+  private loadedVersion: number | null = null;
+  private buildErrors: Diagnostic[] = [];
+  private typeErrors: Diagnostic[] = [];
+  private rawComments: Comment[] = [];
 
-  constructor(createBackend: StageBackendFactory) {
+  constructor(engine: RenderEngine, createBackend: StageBackendFactory) {
     this.createBackend = createBackend;
+    this.host = new DesignHost(engine, () => this.syncScene());
   }
 
-  /** Binds to the stage elements and starts receiving scenes. Returns the teardown. */
+  /** Binds to the stage elements and starts receiving builds. Returns the teardown. */
   attach(els: StageElements): () => void {
     const renderer = this.createBackend(els, (s) => this.store.set({ zoom: Math.round(s * 100) }));
     this.renderer = renderer;
-    const apply = (scene: ScenePayload) => {
-      this.queue = this.queue.then(() => this.applyScene(scene)).catch((e) => console.error(e));
+
+    const onBuild = (payload: BuildPayload) => {
+      if (payload.version !== null && this.loadedVersion !== null && payload.version < this.loadedVersion) return;
+      this.file = payload.file ?? "";
+      this.buildErrors = payload.buildErrors ?? [];
+      this.typeErrors = payload.typeErrors ?? [];
+      this.rawComments = payload.comments ?? [];
+      if (payload.version === null) {
+        this.loadedVersion = null;
+        this.host.clear();
+        this.syncScene();
+      } else if (payload.version !== this.loadedVersion) {
+        this.loadedVersion = payload.version;
+        void this.host.loadBundle(payload.version, this.file);
+      } else {
+        this.syncScene();
+      }
     };
-    api.fetchScene().then(apply);
-    const unsubscribe = api.subscribeScenes(apply);
+
+    const onTypecheck = (diagnostics: Diagnostic[]) => {
+      this.typeErrors = diagnostics;
+      if (this.store.get().ready) this.store.set({ diagnostics: this.mergedDiagnostics() });
+    };
+
+    const onComments = (comments: Comment[]) => {
+      this.rawComments = comments;
+      if (this.store.get().ready) this.store.set({ comments: this.resolvedComments() });
+    };
+
+    api.fetchBuild().then(onBuild).catch((e) => console.error(e));
+    const unsubscribe = api.subscribeEvents({ onBuild, onTypecheck, onComments });
     return () => {
       unsubscribe();
+      this.host.dispose();
       renderer.dispose();
       this.renderer = null;
     };
@@ -99,11 +132,20 @@ export class Viewer {
     return (key && this.store.get().model.nodes.get(key)) || null;
   }
 
-  private async applyScene(scene: ScenePayload) {
+  private mergedDiagnostics(): Diagnostic[] {
+    return [...this.typeErrors, ...this.buildErrors, ...this.host.diagnostics];
+  }
+
+  private resolvedComments(): ResolvedComment[] {
+    const roots = new Map<string, SceneNode>();
+    for (const f of this.host.frames) if (f.root) roots.set(f.name, f.root);
+    return this.rawComments.map((c) => resolveComment(c, roots.get(c.frame)));
+  }
+
+  private syncScene() {
     const renderer = this.renderer;
     if (!renderer) return;
-    await renderer.loadAssets(scene.assets ?? []);
-    const model = buildModel(scene);
+    const model = buildModel(this.host.frames);
     renderer.setModel(model);
 
     const prev = this.store.get();
@@ -114,12 +156,12 @@ export class Viewer {
     const selected = first ? keep(decodeURIComponent(location.hash.slice(1))) : keep(prev.selected);
     this.store.set({
       ready: true,
-      file: scene.file ?? "",
+      file: this.file,
       model,
-      diagnostics: scene.diagnostics ?? [],
-      comments: scene.comments ?? [],
+      diagnostics: this.mergedDiagnostics(),
+      comments: this.resolvedComments(),
       selected,
-      hovered: null,
+      hovered: keep(prev.hovered),
       draft: prev.draft && model.nodes.has(prev.draft.key) ? prev.draft : null,
     });
     this.syncHighlight();

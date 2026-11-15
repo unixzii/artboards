@@ -1,69 +1,20 @@
 // Wire protocol between the dev server and the viewer. Types only, so both
 // sides can import it without pulling in each other's runtime code.
 
+import type { Comment, NewComment, ResolvedComment } from "./comments.ts";
 import type { Diagnostic } from "./diagnostics.ts";
-import type { Box, ComponentInfo, TextRun } from "./scene.ts";
 
-export interface Comment {
-  id: number;
-  /** Artboard name. */
-  frame: string;
-  /** Layer path at the time of writing (see nodePath). */
-  path: string;
-  /** Layer type at the time of writing; used to notice the anchor has moved. */
-  nodeType: string;
-  /** The layer's text (for Text) or name when written; lets the comment follow a layer that moved. */
-  hint?: string;
-  /** Where the reviewer clicked, in artboard coordinates. */
-  point: { x: number; y: number };
-  text: string;
-  createdAt: string;
-  resolved: boolean;
-}
+export type { Comment, NewComment, ResolvedComment };
 
-/** What the viewer sends to create a comment. */
-export type NewComment = Pick<Comment, "frame" | "path" | "nodeType" | "hint" | "point" | "text">;
-
-/** A comment matched against the current tree of its artboard. */
-export interface ResolvedComment extends Comment {
-  /** False when the layer it was attached to is gone or is now a different type. */
-  attached: boolean;
-  /** Current source line of the layer, when attached. */
-  source?: string;
-  /** Short description of the layer, e.g. `<Text "Overview">`. */
-  target?: string;
-}
-
-export interface SerializedNode {
-  type: string;
-  /** Props as written, minus children. For Text, `children` is the text. */
-  props: Record<string, any>;
-  layout: Box;
-  component?: ComponentInfo;
-  /** Text only: the resolved families of the Text's own style. */
-  fontFamilies?: string[];
-  /** Text only: styled runs with their resolved families. */
-  runs?: TextRun[];
-  children: SerializedNode[];
-}
-
-/** A file the viewer must load before painting. */
-export type AssetEntry =
-  | { kind: "font"; family: string; url: string }
-  | { kind: "image"; id: string; url: string };
-
-export interface FramePayload {
-  name: string;
-  /** Null when the artboard failed to build; see `error`. */
-  root: SerializedNode | null;
-  error?: Diagnostic;
-}
-
-/** Everything the viewer needs to draw and inspect one design file. */
-export interface ScenePayload {
+/** Build state sent by the dev server; the design itself executes in the browser. */
+export interface BuildPayload {
   file: string;
-  frames: FramePayload[];
-  diagnostics: Diagnostic[];
-  assets: AssetEntry[];
-  comments: ResolvedComment[];
+  /** Monotonic bundle id for `/design.js?v=${version}`, or null when bundling failed. */
+  version: number | null;
+  /** Bundler errors when the design failed to compile. */
+  buildErrors: Diagnostic[];
+  /** Latest `tsc` diagnostics, updated asynchronously in the background. */
+  typeErrors: Diagnostic[];
+  /** Raw review comments stored next to the design file. */
+  comments: Comment[];
 }

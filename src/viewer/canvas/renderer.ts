@@ -1,12 +1,10 @@
-// Everything that touches CanvasKit: fonts, per-artboard pictures, the WebGL
-// surface, and the viewport transform. Runs every frame while panning, so it
-// stays out of React; the DOM overlay follows through three CSS variables.
+// Stage renderer: records per-artboard SkPictures onto the WebGL/SW CanvasKit
+// surface and manages the viewport transform. Runs every frame while panning,
+// so it stays out of React; the DOM overlay follows through CSS variables.
 
-import type { Canvas, CanvasKit, Image, Paint, SkPicture, Surface } from "canvaskit-wasm";
+import type { Canvas, CanvasKit, Paint, SkPicture, Surface } from "canvaskit-wasm";
 import type { RenderEngine } from "../../shared/engine.ts";
 import { paintNode } from "../../shared/paint.ts";
-import type { AssetEntry } from "../../shared/protocol.ts";
-import { BASE_FAMILY, releaseParagraphs } from "../../shared/text.ts";
 import { bounds, EMPTY_MODEL, hitTest, type Model, type Point, type ViewNode } from "../core/model.ts";
 import type { StageBackend, StageElements } from "../core/viewer.ts";
 
@@ -19,8 +17,6 @@ export class Renderer implements StageBackend {
   private engine: RenderEngine;
   private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint };
   private surface: Surface | null = null;
-  private loads = new Map<string, Promise<void>>();
-  private images = new Map<string, Image | null>();
   private pictures = new Map<string, SkPicture>();
   private model: Model = EMPTY_MODEL;
   private selected: ViewNode | null = null;
@@ -31,19 +27,11 @@ export class Renderer implements StageBackend {
   private scheme = matchMedia("(prefers-color-scheme: dark)");
   private onZoom: (scale: number) => void;
 
-  constructor(ck: CanvasKit, els: StageElements, onZoom: (scale: number) => void) {
+  constructor(ck: CanvasKit, engine: RenderEngine, els: StageElements, onZoom: (scale: number) => void) {
     this.ck = ck;
+    this.engine = engine;
     this.els = els;
     this.onZoom = onZoom;
-    this.engine = {
-      ck,
-      fonts: {
-        provider: ck.TypefaceFontProvider.Make(),
-        // Nodes arrive with their families already resolved by the server.
-        resolve: () => ({ families: [BASE_FAMILY], missing: [] }),
-      },
-      images: { get: (id) => this.images.get(id) ?? null },
-    };
     const stroke = (r: number, g: number, b: number, a = 1) => {
       const p = new ck.Paint();
       p.setAntiAlias(true);
@@ -78,31 +66,10 @@ export class Renderer implements StageBackend {
 
   // ------------------------------------------------------------------ content
 
-  /** Fetches and registers fonts and images not seen before. Await before setModel. */
-  loadAssets(assets: AssetEntry[]): Promise<unknown> {
-    return Promise.all(
-      assets.map((asset) => {
-        let load = this.loads.get(asset.url);
-        if (!load) {
-          load = fetch(asset.url)
-            .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${r.status} ${asset.url}`))))
-            .then((bytes) => {
-              if (asset.kind === "font") this.engine.fonts.provider.registerFont(bytes, asset.family);
-              else this.images.set(asset.id, this.ck.MakeImageFromEncoded(bytes));
-            })
-            .catch((e) => console.warn("asset failed to load:", e));
-          this.loads.set(asset.url, load);
-        }
-        return load;
-      }),
-    );
-  }
-
   /** Replaces the scene: each artboard is recorded once into a picture and replayed per frame. */
   setModel(model: Model) {
     for (const picture of this.pictures.values()) picture.delete();
     this.pictures.clear();
-    for (const f of this.model.frames) if (f.root) releaseParagraphs(f.root);
     this.model = model;
     this.selected = this.hovered = null;
     for (const f of model.frames) {
