@@ -134,7 +134,7 @@ const textStyle = {
 
 /** Prop sets shared by several elements; the .d.ts declares each once as `<Name>Props`. */
 const GROUPS = {
-  Layer: { doc: "Props every element but <Span> takes: size, placement, opacity, rotation, mask, name and onClick.", props: box },
+  Layer: { doc: "Props every element but <Span> takes.", props: box },
   Paint: { doc: "Fill, border paint and effects of a shape.", props: paint },
   Border: { doc: "Border geometry of a rectangular box.", props: border },
   Container: { doc: "Props of an element that holds child elements.", props: container },
