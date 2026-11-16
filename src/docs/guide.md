@@ -42,7 +42,9 @@ cannot say.
 - `absolute` takes a child of Row/Column/Grid out of the flow and places it the same way, e.g. a badge:
   `<Ellipse absolute right={-4} y={-4} width={10} height={10} fill="#ef4444" />`.
 - Later siblings paint on top of earlier ones. Put overlays (sheets, toasts, badges) last.
-- `rotation` and `opacity` only affect painting, never layout.
+- `translateX`/`translateY`, `scale`, `rotation` and `opacity` only affect painting, never layout: siblings
+  don't move and the parent's size doesn't change. `rotation` and `scale` turn around `origin`, given as fractions
+  of the layer's box (`[0.5, 0.5]`, the centre, by default; `[0, 1]` the bottom-left corner).
 
 ## Paint
 
@@ -162,6 +164,43 @@ const update = (x: number) => setValue(Math.max(0, Math.min(1, x / 200)));
 A long list goes in a container with `scroll="vertical"` (or `"horizontal"`, `"both"`) and a fixed or
 `"fill"` size; it clips its content, and reviewers scroll it in Play mode with the wheel or by dragging.
 Scrolling is the viewer's own state: components never see it, and screenshots show the start.
+
+## Motion
+
+Animate by changing props over time. Prefer the paint-only props (`translateX`/`translateY`, `scale`,
+`rotation`, `opacity`, colors) for motion; animating `width`, `x` and other layout props works but moves
+siblings and re-runs layout every frame.
+
+`useSpring(target, { duration, bounce })` returns a number that follows `target` with spring physics.
+`duration` is in ms (default 500); `bounce` 0 settles without overshoot, 0.15–0.3 is a gentle bounce. When the
+target changes mid-flight the value carries on from where it is, with its velocity. Spring one 0..1 progress per
+state change and derive every prop from it:
+
+```tsx
+function Sheet({ open }: { open: boolean }) {
+  const p = useSpring(open ? 1 : 0, { duration: 450, bounce: 0.12 });
+  return (
+    <Frame width="fill" height="fill">
+      <Rect width="fill" height="fill" fill="#000000" opacity={p * 0.4} />
+      <Column absolute bottom={0} width="fill" height={320} translateY={(1 - p) * 340} fill="#fff" cornerRadius={[20, 20, 0, 0]} />
+    </Frame>
+  );
+}
+```
+
+- Entrance: `useSpring(1, { from: 0 })` starts at 0 when the component mounts.
+- Stagger: chain springs, each following the previous one's value, for a follow-through cascade.
+  Keep the number of `useSpring` calls fixed between renders, as with any hook:
+  `let v = open ? 1 : 0; const steps = items.map(() => (v = useSpring(v, { duration: 300 })));`
+- Exit: keep a layer mounted until its spring reaches 0, e.g. `p > 0.001 && <Toast ... />`.
+
+`useAnimationTime()` returns the ms since the component mounted and re-renders it every frame. Use it for
+looping and procedural motion: `rotation={(t * 0.36) % 360}` turns once a second,
+`opacity={0.5 + 0.5 * Math.sin(t / 300)}` pulses. Read the time from it rather than `Date.now()`.
+
+Motion runs in the viewer's Play mode (P). Everywhere else (the viewer outside Play mode, `render`, `inspect`,
+`lint`) time stands still and every spring shows its target: the state where the motion ends. In the CLI,
+`useAnimationTime()` returns 0, so a loop should look right at time 0.
 
 ## Commands
 

@@ -6,6 +6,7 @@ import type { Diagnostic } from "../diagnostics.ts";
 import type { SceneNode } from "../scene.ts";
 import { createSceneRoot } from "./reconciler.ts";
 export { flushSceneSync } from "./reconciler.ts";
+import { AnimationContext, type AnimationClock } from "./animation.ts";
 import { DslError } from "./schema.ts";
 import { VariantContext, VariantStore, type VariantInfo } from "./variants.ts";
 
@@ -43,6 +44,8 @@ export function pickFrames(frames: FrameEntry[], name: string | undefined, file:
 
 export interface ReconcileOptions {
   variants?: VariantStore;
+  /** Drives `useAnimationTime` and `useSpring`. Without one, time stands still and springs show their target. */
+  clock?: AnimationClock;
   onCommit?: () => void;
   onError?: (error: unknown) => void;
 }
@@ -58,7 +61,8 @@ export function reconcileFrame(
 ): { container: SceneNode; host: SceneNode; variants: VariantStore; unmount(): void } {
   const variants = opts.variants ?? new VariantStore();
   const scene = createSceneRoot({ onCommit: opts.onCommit, onError: opts.onError });
-  scene.render(createElement(VariantContext.Provider, { value: variants }, createElement(frame.component)));
+  const artboard = createElement(VariantContext.Provider, { value: variants }, createElement(frame.component));
+  scene.render(opts.clock ? createElement(AnimationContext.Provider, { value: opts.clock }, artboard) : artboard);
   const roots = scene.root.children.filter((c) => c.type !== "#text");
   if (roots.length !== 1) {
     scene.unmount();

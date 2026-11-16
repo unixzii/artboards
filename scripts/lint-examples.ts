@@ -12,6 +12,7 @@ const EXAMPLES = [
   "examples/page1.jsx",
   "examples/path.jsx",
   "examples/interaction.tsx",
+  "examples/motion.tsx",
   "examples/features/features.jsx",
   "examples/features/illustrations.jsx",
   "examples/roastery/index.tsx",

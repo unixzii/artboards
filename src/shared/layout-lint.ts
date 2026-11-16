@@ -4,7 +4,7 @@ import { parseColor } from "./color.ts";
 import type { Diagnostic } from "./diagnostics.ts";
 import type { RenderEngine } from "./engine.ts";
 import { gradientStops } from "./paint.ts";
-import { MASK_TYPE, expandSides, isComponentNode, nodePath, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "./scene.ts";
+import { MASK_TYPE, expandSides, isComponentNode, nodePath, paintTransform, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "./scene.ts";
 import { naturalTextHeight } from "./text.ts";
 
 const validPaths = new Set<string>();
@@ -19,12 +19,19 @@ function luminance(c: ArrayLike<number>): number {
 }
 
 /** Axis-aligned bounds of a box rotated about its centre. */
-function rotatedBounds(x: number, y: number, w: number, h: number, deg: number) {
-  if (!deg) return { x, y, w, h };
-  const r = (deg * Math.PI) / 180;
-  const bw = Math.abs(w * Math.cos(r)) + Math.abs(h * Math.sin(r));
-  const bh = Math.abs(w * Math.sin(r)) + Math.abs(h * Math.cos(r));
-  return { x: x + (w - bw) / 2, y: y + (h - bh) / 2, w: bw, h: bh };
+/**
+ * Bounds of a layer turned by its `rotation` (about its `origin`). `translateX/Y`
+ * and `scale` are left out: they mostly move layers in and out while animating.
+ */
+function rotatedBounds(x: number, y: number, w: number, h: number, props: Record<string, any>) {
+  const m = paintTransform({ rotation: props.rotation, origin: props.origin }, w, h);
+  if (!m) return { x, y, w, h };
+  const [a, b, c, d, e, f] = m;
+  const xs = [e, a * w + e, c * h + e, a * w + c * h + e];
+  const ys = [f, b * w + f, d * h + f, b * w + d * h + f];
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  return { x: x + x0, y: y + y0, w: Math.max(...xs) - x0, h: Math.max(...ys) - y0 };
 }
 
 const POSITION_PROPS = ["x", "y", "right", "bottom"] as const;
@@ -61,7 +68,7 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
     }
 
     if (p && p.type !== "#root" && p.type !== MASK_TYPE && !p.props.clip && !p.props.scroll) {
-      const b = rotatedBounds(x, y, width, height, n.props.rotation ?? 0);
+      const b = rotatedBounds(x, y, width, height, n.props);
       const dx = Math.max(0, -b.x, b.x + b.w - p.layout.width);
       const dy = Math.max(0, -b.y, b.y + b.h - p.layout.height);
       // An `absolute` overlay may hang off an edge on purpose (a corner badge);

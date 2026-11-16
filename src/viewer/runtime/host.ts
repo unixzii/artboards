@@ -18,6 +18,7 @@ import {
   type FrameEntry,
   type SourceMapper,
 } from "../../shared/dsl/frame.ts";
+import { AnimationClock } from "../../shared/dsl/animation.ts";
 import { groupComponents } from "../../shared/dsl/reconciler.ts";
 import { VariantStore, type VariantValue } from "../../shared/dsl/variants.ts";
 import { prepareTree, type RenderEngine } from "../../shared/engine.ts";
@@ -43,6 +44,10 @@ interface ManagedArtboard extends MountedArtboard {
   disposed: boolean;
   container: SceneNode | null;
   unmount?: () => void;
+  /** Animation time of this artboard; runs only in Play mode. */
+  clock: AnimationClock;
+  /** rAF timestamp the clock was last advanced at. */
+  lastTick?: number;
   /** Set once an interaction handler commits state, is clicked, or throws; only a reset or a new bundle clears it. */
   clicked: boolean;
   /** The last interaction handler that threw. */
@@ -52,8 +57,11 @@ interface ManagedArtboard extends MountedArtboard {
   lintDebounce?: ReturnType<typeof setTimeout>;
 }
 
-function managed(entry: FrameEntry, variants: VariantStore): ManagedArtboard {
+function managed(entry: FrameEntry, variants: VariantStore, playing: boolean): ManagedArtboard {
+  const clock = new AnimationClock();
+  clock.running = playing;
   const item: ManagedArtboard = {
+    clock,
     name: entry.name,
     entry,
     root: null,
@@ -79,6 +87,11 @@ export class DesignHost {
   private moduleDiagnostics: Diagnostic[] = [];
   private mapSource: SourceMapper | undefined;
   private queue: Promise<void> = Promise.resolve();
+  /** Jobs in `queue` not finished yet; animation frames wait for relayouts to catch up. */
+  private pendingJobs = 0;
+  /** Play mode: animation clocks run and a frame loop advances them. */
+  private playing = false;
+  private frameRequest: number | null = null;
   private loadSeq = 0;
   private lintTimer: ReturnType<typeof setTimeout> | undefined;
   /** Variant values picked per artboard, carried into the next bundle. */
@@ -91,6 +104,7 @@ export class DesignHost {
   }
 
   dispose() {
+    this.setPlaying(false);
     this.clear();
   }
 
@@ -143,8 +157,66 @@ export class DesignHost {
   }
 
   private enqueue(fn: () => Promise<void>): Promise<void> {
-    this.queue = this.queue.then(fn).catch((e) => console.error(e));
+    this.pendingJobs++;
+    this.queue = this.queue
+      .then(fn)
+      .catch((e) => console.error(e))
+      .finally(() => {
+        this.pendingJobs--;
+      });
     return this.queue;
+  }
+
+  /**
+   * Starts or stops animation time. Stopping settles every spring, so outside
+   * Play mode artboards show the state where their motion ends.
+   */
+  setPlaying(playing: boolean) {
+    if (this.playing === playing) return;
+    this.playing = playing;
+    for (const item of this.managed) {
+      if (item.disposed) continue;
+      item.lastTick = undefined;
+      this.runClock(item, () => item.clock.setRunning(playing));
+    }
+    if (playing) this.requestFrame();
+    else if (this.frameRequest !== null) {
+      cancelAnimationFrame(this.frameRequest);
+      this.frameRequest = null;
+    }
+  }
+
+  private requestFrame() {
+    if (this.frameRequest === null) this.frameRequest = requestAnimationFrame(this.tick);
+  }
+
+  /** Advances the clocks of artboards that are animating, one display frame at a time. */
+  private tick = (now: number) => {
+    this.frameRequest = null;
+    if (!this.playing) return;
+    // Let the previous frame's relayout land before rendering the next one.
+    if (this.pendingJobs === 0) {
+      for (const item of this.managed) {
+        if (item.disposed || !item.clock.active) {
+          item.lastTick = undefined;
+          continue;
+        }
+        // Long stalls (a hidden tab) don't fast-forward motion.
+        const dt = item.lastTick === undefined ? 1000 / 60 : Math.min(now - item.lastTick, 100);
+        item.lastTick = now;
+        this.runClock(item, () => item.clock.advance(dt));
+      }
+    }
+    this.requestFrame();
+  };
+
+  /** Runs a clock change and commits the re-renders it causes in one go. */
+  private runClock(item: ManagedArtboard, fn: () => void) {
+    try {
+      flushSceneSync(fn);
+    } catch (e) {
+      this.handleAsyncError(item, e);
+    }
   }
 
   /** Imports a newly built `design.js?v=<version>` bundle and mounts all artboards. */
@@ -178,11 +250,12 @@ export class DesignHost {
 
       const reconciled: { item: ManagedArtboard; host: SceneNode }[] = [];
       for (const entry of entries) {
-        const item = managed(entry, new VariantStore([], this.remembered.get(entry.name)));
+        const item = managed(entry, new VariantStore([], this.remembered.get(entry.name)), this.playing);
         this.managed.push(item);
         try {
           const mounted = reconcileFrame(item.entry, {
             variants: item.variants,
+            clock: item.clock,
             onCommit: () => {
               if (item.pendingInteraction) item.clicked = true;
               this.scheduleRelayout(item);
@@ -258,6 +331,7 @@ export class DesignHost {
     try {
       const mounted = reconcileFrame(item.entry, {
         variants: item.variants,
+        clock: item.clock,
         onCommit: () => {
           if (item.pendingInteraction) item.clicked = true;
           this.scheduleRelayout(item);
@@ -282,7 +356,7 @@ export class DesignHost {
       if (i < 0) return;
       this.teardown(this.managed[i]);
       this.remembered.delete(name);
-      const item = managed(this.managed[i].entry, new VariantStore());
+      const item = managed(this.managed[i].entry, new VariantStore(), this.playing);
       this.managed[i] = item;
       await this.mount(item);
       this.syncDiagnostics();

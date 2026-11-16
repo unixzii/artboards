@@ -22,6 +22,10 @@ type PropType =
   | { kind: "letterSpacing" }
   | { kind: "fontWeight" }
   | { kind: "viewBox" }
+  /** A number, or `[x, y]`. */
+  | { kind: "scale" }
+  /** `[x, y]` fractions of the layer's box. */
+  | { kind: "origin" }
   | { kind: "handler" }
   | { kind: "jsx" }
   | { kind: "enum"; values: readonly string[] }
@@ -64,7 +68,11 @@ const box = {
   rowSpan: int("Number of rows this child spans inside a <Grid>.", "1"),
   opacity: num("Opacity of the element and everything inside it, 0..1.", "1", 0, 1),
   blur: num("Gaussian blur radius in px applied to this layer and its descendants. Does not affect layout.", "0"),
-  rotation: { type: { kind: "number", min: -Infinity }, doc: "Clockwise rotation in degrees around the centre. Paint only: layout uses the unrotated box.", default: "0" },
+  rotation: { type: { kind: "number", min: -Infinity }, doc: "Clockwise rotation in degrees around `origin`. Paint only: layout uses the unrotated box.", default: "0" },
+  translateX: { type: { kind: "number", min: -Infinity }, doc: "Moves the painted layer right by this many px (left when negative). Paint only: layout and siblings don't move.", default: "0" },
+  translateY: { type: { kind: "number", min: -Infinity }, doc: "Moves the painted layer down by this many px (up when negative). Paint only: layout and siblings don't move.", default: "0" },
+  scale: { type: { kind: "scale" }, doc: "Scales the painted layer around `origin`: a factor, or `[x, y]` per axis. Paint only: layout uses the unscaled box.", default: "1" },
+  origin: { type: { kind: "origin" }, doc: "Pivot of `rotation` and `scale`, as fractions of the layer's box: `[0, 0]` is the top-left corner, `[0.5, 1]` the bottom centre.", default: "[0.5, 0.5]" },
   mask: { type: { kind: "jsx" }, doc: "A JSX alpha mask, laid out against this layer's bounds without affecting its size." },
   name: { type: { kind: "string" }, doc: "Layer name shown in inspect output and diagnostics." },
   onClick: {
@@ -287,7 +295,16 @@ export const HINTS: Record<string, string> = {
   top: "use `y`",
   left: "use `x`",
   zIndex: "later siblings paint on top; reorder children instead",
-  transform: "use `rotation` (degrees)",
+  transform: "use `translateX` / `translateY`, `scale` and `rotation` (degrees)",
+  translate: "use `translateX` / `translateY`",
+  translateZ: "there is no 3D; use `translateX` / `translateY`",
+  scaleX: "use `scale={[x, y]}`",
+  scaleY: "use `scale={[x, y]}`",
+  transformOrigin: "use `origin={[0.5, 0.5]}` (fractions of the box)",
+  anchor: "use `origin={[0.5, 0.5]}` (fractions of the box)",
+  pivot: "use `origin={[0.5, 0.5]}` (fractions of the box)",
+  transition: "animate with `useSpring` and pass its value as a prop",
+  animation: "animate with `useAnimationTime` or `useSpring` and pass the value as a prop",
   rotate: "use `rotation` (degrees)",
   alpha: "use `opacity`",
   numberOfLines: "use `maxLines`",
@@ -334,6 +351,12 @@ export const ELEMENT_HINTS: Record<string, string> = {
   Em: "use <Span italic> inside <Text>",
   Tspan: "use <Span> inside <Text>",
   Table: "use <Grid> with `columns`",
+  useTime: "use `useAnimationTime()` (ms since the component mounted)",
+  useFrame: "use `useAnimationTime()`: the component re-renders every frame with the time",
+  useTicker: "use `useAnimationTime()`: the component re-renders every frame with the time",
+  requestAnimationFrame: "use `useAnimationTime()`: the component re-renders every frame with the time",
+  useAnimation: "use `useSpring(target)` or `useAnimationTime()`",
+  useTween: "use `useSpring(target, { duration, bounce })`",
 };
 
 export class DslError extends Error {
@@ -440,6 +463,10 @@ function describe(t: PropType, prop: string): string {
       return 'a number of px, or a string relative to the font size such as "-1.1%" or "-0.011em"';
     case "fontWeight":
       return "a number from 1 to 1000 (400 regular, 700 bold)";
+    case "scale":
+      return "a number, or [x, y]";
+    case "origin":
+      return "[x, y] fractions of the box, e.g. [0.5, 0.5] for the centre";
     case "handler":
       return "a function";
     case "jsx":
@@ -492,6 +519,10 @@ function matches(t: PropType, v: unknown, prop: string): boolean {
       return isNum(v) && v >= 1 && v <= 1000;
     case "viewBox":
       return parseViewBox(v) !== null;
+    case "scale":
+      return isNum(v) || (Array.isArray(v) && v.length === 2 && v.every(isNum));
+    case "origin":
+      return Array.isArray(v) && v.length === 2 && v.every(isNum);
     case "handler":
       return typeof v === "function";
     case "jsx":
@@ -580,6 +611,10 @@ function tsType(t: PropType, prop: string): string {
       return "FontWeight";
     case "viewBox":
       return "ViewBox";
+    case "scale":
+      return "number | [number, number]";
+    case "origin":
+      return "[number, number]";
     case "handler":
       return "(event: MouseEvent) => void";
     case "jsx":

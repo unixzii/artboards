@@ -8,6 +8,7 @@ import {
   expandSides,
   isComponentNode,
   MASK_TYPE,
+  paintTransform,
   parseViewBox,
   type Fill,
   type GradientStop,
@@ -91,7 +92,11 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
 
   canvas.save();
   canvas.translate(x, y);
-  if (p.rotation) canvas.rotate(p.rotation, w / 2, h / 2);
+  const transform = paintTransform(p, w, h);
+  if (transform) {
+    const [a, b, c, d, e, f] = transform;
+    canvas.concat([a, c, e, b, d, f, 0, 0, 1]);
+  }
 
   if (node.mask) canvas.saveLayer();
 

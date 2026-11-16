@@ -6,6 +6,7 @@ import { DefaultEventPriority } from "react-reconciler/constants.js";
 import { COMPONENT_TYPE, MASK_TYPE, createNode, layerChildren, type Box, type ComponentInfo, type SceneNode } from "../scene.ts";
 import { componentSourceOf, layerProps } from "./jsx-runtime.ts";
 import { DslError, validateProps } from "./schema.ts";
+import { AnimationContext } from "./animation.ts";
 import { VariantContext } from "./variants.ts";
 
 const INTERNAL_PROPS = new Set(["key", "ref", "$source"]);
@@ -80,10 +81,10 @@ function componentInfoForFiber(fiber: any, name: string): ComponentInfo {
   return info;
 }
 
-/** Whether a fiber is the root, or the variant provider every artboard is wrapped in. */
+/** Whether a fiber is the root, or one of the providers every artboard is wrapped in. */
 function atTop(fiber: any): boolean {
   if (!fiber || fiber.tag === 3) return true; // HostRoot
-  return fiber.type === VariantContext && atTop(fiber.return);
+  return (fiber.type === VariantContext || fiber.type === AnimationContext) && atTop(fiber.return);
 }
 
 /** Extracts the outermost-to-innermost sub-component chain enclosing a host Fiber. */

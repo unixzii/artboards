@@ -19,6 +19,33 @@ export interface MouseEvent {
   hovered: boolean;
 }
 
+/** 2D affine transform `[a, b, c, d, e, f]`: x' = a·x + c·y + e, y' = b·x + d·y + f. */
+export type Affine = [number, number, number, number, number, number];
+
+/**
+ * A layer's paint-only transform inside its laid-out box (`translateX/Y`,
+ * then `rotation` and `scale` about `origin`), in the box's own coordinates.
+ * Null when it has none.
+ */
+export function paintTransform(props: Record<string, any>, width: number, height: number): Affine | null {
+  const tx = typeof props.translateX === "number" ? props.translateX : 0;
+  const ty = typeof props.translateY === "number" ? props.translateY : 0;
+  const rotation = typeof props.rotation === "number" ? props.rotation : 0;
+  const [sx, sy] = typeof props.scale === "number" ? [props.scale, props.scale] : Array.isArray(props.scale) ? props.scale : [1, 1];
+  if (!tx && !ty && !rotation && sx === 1 && sy === 1) return null;
+  const [fx, fy] = Array.isArray(props.origin) ? props.origin : [0.5, 0.5];
+  const ox = fx * width;
+  const oy = fy * height;
+  const r = (rotation * Math.PI) / 180;
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  const a = cos * sx;
+  const b = sin * sx;
+  const c = -sin * sy;
+  const d = cos * sy;
+  return [a, b, c, d, tx + ox - (a * ox + c * oy), ty + oy - (b * ox + d * oy)];
+}
+
 export type Padding = number | [number, number] | [number, number, number, number];
 
 export interface Shadow {

@@ -427,6 +427,8 @@ export class Viewer {
     this.captured = null;
     this.hoveredIds = [];
     this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false, measuring: false });
+    // Motion runs only in Play mode; elsewhere artboards hold the state their animations settle in.
+    this.host.setPlaying(tool === "play");
     if (tool === "play") this.hover(null);
   }
 

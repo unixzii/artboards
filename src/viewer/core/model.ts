@@ -4,7 +4,7 @@
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
-import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, type MouseEvent, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, paintTransform, type Affine, type MouseEvent, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   id: number;
@@ -60,7 +60,7 @@ export interface Point {
   y: number;
 }
 
-export type Affine = [number, number, number, number, number, number];
+export type { Affine };
 
 const IDENTITY: Affine = [1, 0, 0, 1, 0, 0];
 
@@ -68,33 +68,18 @@ function multiply([a1, b1, c1, d1, e1, f1]: Affine, [a2, b2, c2, d2, e2, f2]: Af
   return [a1 * a2 + c1 * b2, b1 * a2 + d1 * b2, a1 * c2 + c1 * d2, b1 * c2 + d1 * d2, a1 * e2 + c1 * f2 + e1, b1 * e2 + d1 * f2 + f1];
 }
 
-/** Placement of a node inside its parent: offset, then rotation about its centre. */
-function placement(layout: { x: number; y: number; width: number; height: number }, rotation: unknown): Affine {
+/** Placement of a node inside its parent: offset, then its paint transform (translate, rotation and scale). */
+function placement(layout: { x: number; y: number; width: number; height: number }, props: Record<string, any>): Affine {
   const move: Affine = [1, 0, 0, 1, layout.x, layout.y];
-  if (typeof rotation !== "number" || !rotation) return move;
-  const r = (rotation * Math.PI) / 180;
-  const cos = Math.cos(r);
-  const sin = Math.sin(r);
-  const cx = layout.width / 2;
-  const cy = layout.height / 2;
-  return multiply(move, [cos, sin, -sin, cos, cx - cos * cx + sin * cy, cy - sin * cx - cos * cy]);
+  const transform = paintTransform(props, layout.width, layout.height);
+  return transform ? multiply(move, transform) : move;
 }
 
-/** A point in the parent's coordinates -> the node's own (unrotated) coordinates. */
+/** A point in the parent's coordinates -> the node's own (untransformed) coordinates. */
 function toLocal(n: { layout: { x: number; y: number; width: number; height: number }; props: Record<string, any> }, px: number, py: number): Point {
-  let lx = px - n.layout.x;
-  let ly = py - n.layout.y;
-  const rotation = n.props.rotation;
-  if (typeof rotation === "number" && rotation) {
-    const r = (-rotation * Math.PI) / 180;
-    const cx = n.layout.width / 2;
-    const cy = n.layout.height / 2;
-    const dx = lx - cx;
-    const dy = ly - cy;
-    lx = cx + dx * Math.cos(r) - dy * Math.sin(r);
-    ly = cy + dx * Math.sin(r) + dy * Math.cos(r);
-  }
-  return { x: lx, y: ly };
+  const m = placement(n.layout, n.props);
+  if (m[0] * m[3] - m[1] * m[2] === 0) return { x: NaN, y: NaN };
+  return apply(invert(m), { x: px, y: py });
 }
 
 export const EMPTY_MODEL: Model = { frames: [], nodes: new Map(), byId: new Map() };
@@ -117,7 +102,7 @@ function place(node: ViewNode) {
   const sy = scroll?.y ?? 0;
   node.abs = { x: (parent?.abs.x ?? 0) - sx + node.layout.x, y: (parent?.abs.y ?? 0) - sy + node.layout.y };
   const content = sx || sy ? multiply(parent!.matrix, [1, 0, 0, 1, -sx, -sy]) : (parent?.matrix ?? IDENTITY);
-  node.matrix = multiply(content, placement(node.layout, node.props.rotation));
+  node.matrix = multiply(content, placement(node.layout, node.props));
 }
 
 /** How far a `scroll` container's content reaches past its box, per scrolled axis. */

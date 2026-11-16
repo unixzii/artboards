@@ -98,6 +98,37 @@ declare module "artboards" {
    */
   export function useVariant<const T extends VariantValue>(name: string, options: readonly T[], initial?: NoInfer<T>): [T, (value: T) => void];
 
+  /**
+   * Milliseconds since the calling component mounted. In the viewer's Play mode the
+   * component re-renders on every animation frame with the new time; outside Play mode
+   * and in the CLI, time stands still. Use it for looping or procedural motion
+   * (spinners, shimmer, orbits) and derive props from it.
+   * @param active Pass `false` to stop re-rendering every frame. Default true.
+   * @example
+   * const t = useAnimationTime();
+   * <Path rotation={(t * 0.36) % 360} ... /> // one turn per second
+   */
+  export function useAnimationTime(active?: boolean): number;
+
+  export interface SpringOptions {
+    /** Perceived duration in ms: roughly how long the motion takes. Default 500. */
+    duration?: number;
+    /** From -1 to 1, exclusive. 0 settles without overshoot; 0.15–0.3 is a gentle bounce; higher bounces more. Default 0. */
+    bounce?: number;
+    /** Value on mount, sprung to `target` straight away (an entrance). Default `target`. */
+    from?: number;
+  }
+  /**
+   * A number that follows `target` with spring physics. When `target` changes it moves
+   * from where it is, keeping its velocity, so interrupted motion stays smooth. Spring a
+   * 0..1 progress and derive every prop from it. To stagger, chain springs: one follows
+   * another's value. Static output (CLI, the viewer outside Play mode) shows the target.
+   * @example
+   * const p = useSpring(open ? 1 : 0, { duration: 450, bounce: 0.15 });
+   * <Column translateY={(1 - p) * 320} opacity={p}>...</Column>
+   */
+  export function useSpring(target: number, options?: SpringOptions): number;
+
   /** Pointer state passed to layer mouse handlers (`onClick`, `onMouseDown`, `onMouseMove`, `onMouseUp`, `onMouseEnter`, `onMouseLeave`) in Play mode. */
   export interface MouseEvent {
     /** Pointer X in this layer's local coordinates (0..width, before rotation and parent scrolling). */

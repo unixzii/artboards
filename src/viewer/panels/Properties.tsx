@@ -22,7 +22,7 @@ const PROP_GROUPS: [title: string, props: Set<string>][] = [
     new Set([
       "padding", "gap", "crossGap", "columnGap", "rowGap", "align", "justify", "wrap", "columns", "rows",
       "minWidth", "maxWidth", "minHeight", "maxHeight", "grow", "alignSelf", "colSpan", "rowSpan",
-      "absolute", "x", "y", "right", "bottom", "rotation", "clip", "scroll",
+      "absolute", "x", "y", "right", "bottom", "rotation", "translateX", "translateY", "scale", "origin", "clip", "scroll",
     ]),
   ],
   [
