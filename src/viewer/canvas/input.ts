@@ -66,9 +66,11 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
         dragged = true;
         if (!capturedLayer) stage.classList.add("panning");
       }
-      if (capturedLayer) {
+      if (capturedLayer || !dragged) {
         viewer.pointerMoveAt(p, true);
-      } else if (dragged && !viewer.scrollAt(downAt, prev.x - p.x, prev.y - p.y)) {
+      } else if (viewer.scrollAt(downAt, prev.x - p.x, prev.y - p.y)) {
+        viewer.pointerMoveAt(p, true);
+      } else {
         // Content follows the pointer, so it scrolls the opposite way to the drag.
         viewer.panBy(p.x - prev.x, p.y - prev.y);
       }
@@ -92,7 +94,7 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
   };
   on(stage, "pointerup", release);
   on(stage, "pointercancel", release);
-  on(stage, "pointerleave", () => viewer.hover(null));
+  on(stage, "pointerleave", (e) => viewer.pointerLeaveAt(local(e)));
 
   on(
     stage,

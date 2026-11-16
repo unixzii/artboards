@@ -127,12 +127,17 @@ artboard to switch its variants in the Properties panel.
 
 ## Interaction
 
-Any layer element takes `onClick`, `onMouseDown`, `onMouseMove`, and `onMouseUp`. They run in the
-viewer's Play mode (P); the innermost layer with a matching handler under the pointer wins. Each handler
-receives `event: MouseEvent` (`{ x, y, pressed }`), where `x` and `y` are in the handler layer's own
-local coordinates (before rotation and scrolling) and `pressed` tells whether the primary mouse button
-is held down. While dragging after a press on an interactive layer, `onMouseMove` and `onMouseUp` stay
-captured by that layer even if the pointer moves outside its bounds.
+Any layer element takes `onClick`, `onMouseDown`, `onMouseMove`, `onMouseUp`, `onMouseEnter`, and
+`onMouseLeave`. They run in the viewer's Play mode (P). For `onClick`, `onMouseDown`, `onMouseMove`, and
+`onMouseUp`, the innermost layer with a matching handler under the pointer wins. `onMouseEnter` and
+`onMouseLeave` follow container enter/leave semantics (moving between a layer and its children does not
+leave the parent) and also fire while the mouse button is held down.
+
+Each handler receives `event: MouseEvent` (`{ x, y, pressed, hovered }`), where `x` and `y` are in the
+handler layer's own local coordinates (before rotation and scrolling), `pressed` tells whether the primary
+mouse button is held down, and `hovered` tells whether the pointer is currently over that layer. While
+dragging after a press on an interactive layer, `onMouseMove` and `onMouseUp` stay captured by that layer
+even if the pointer moves outside its bounds (`event.hovered` updates dynamically).
 
 Screenshots, `inspect` and `lint` always show the initial state. Keep states that matter for review in
 a variant so they can be picked without interacting and rendered from the CLI:

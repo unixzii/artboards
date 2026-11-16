@@ -83,6 +83,14 @@ const box = {
     type: { kind: "handler" },
     doc: "Runs when a pressed mouse button is released in the viewer's Play mode.",
   },
+  onMouseEnter: {
+    type: { kind: "handler" },
+    doc: "Runs when the pointer enters this layer (including while a mouse button is held down) in the viewer's Play mode.",
+  },
+  onMouseLeave: {
+    type: { kind: "handler" },
+    doc: "Runs when the pointer leaves this layer (including while a mouse button is held down) in the viewer's Play mode.",
+  },
 } satisfies Record<string, PropDef>;
 
 const shadowProp: PropDef = {
@@ -301,6 +309,10 @@ export const HINTS: Record<string, string> = {
   onPointerDown: "use `onMouseDown`",
   onPointerMove: "use `onMouseMove`",
   onPointerUp: "use `onMouseUp`",
+  onPointerEnter: "use `onMouseEnter`",
+  onPointerLeave: "use `onMouseLeave`",
+  onMouseOver: "use `onMouseEnter`",
+  onMouseOut: "use `onMouseLeave`",
   onPress: "use `onClick`",
 };
 

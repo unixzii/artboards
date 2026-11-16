@@ -9,7 +9,7 @@ import type { BuildPayload, Comment, ResolvedComment } from "../../shared/protoc
 import type { MouseEvent, SceneNode } from "../../shared/scene.ts";
 import { DesignHost } from "../runtime/host.ts";
 import type { Backend } from "./backend.ts";
-import { buildModel, captureTarget, describe, EMPTY_MODEL, isClickable, mouseTarget, nodeKey, scrollNode, scrollTarget, toLayer, type ViewFrame, type Model, type Point, type ViewNode } from "./model.ts";
+import { buildModel, captureTarget, describe, EMPTY_MODEL, hoveredChain, isClickable, isHovered, mouseTarget, nodeKey, scrollNode, scrollTarget, toLayer, type ViewFrame, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
 
 /** select: inspect layers; comment: pin a comment to a layer; play: run the design's interaction handlers. */
@@ -106,8 +106,10 @@ export class Viewer {
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   /** Scroll offsets by layer key; viewer state only, kept across rebuilds and tools. */
   private scrolls = new Map<string, Point>();
-  /** Layer key captured on primary pointerdown in Play mode. */
-  private capturedKey: string | null = null;
+  /** Layer captured on primary pointerdown in Play mode. */
+  private captured: { id: number; key: string } | null = null;
+  /** Host layer ids currently hovered in Play mode, outermost to innermost. */
+  private hoveredIds: number[] = [];
 
   constructor(engine: RenderEngine, backend: Backend, createStage: StageBackendFactory) {
     this.backend = backend;
@@ -135,10 +137,14 @@ export class Viewer {
       this.rawComments = payload.comments ?? [];
       if (payload.version === null) {
         this.loadedVersion = null;
+        this.captured = null;
+        this.hoveredIds = [];
         this.host.clear();
         this.syncScene();
       } else if (payload.version !== this.loadedVersion) {
         this.loadedVersion = payload.version;
+        this.captured = null;
+        this.hoveredIds = [];
         void this.host.loadBundle(payload.version, this.file);
       } else {
         this.syncScene();
@@ -275,7 +281,10 @@ export class Viewer {
     this.pointerMoveAt(screen, false);
   }
 
-  private resolveCaptured(key: string): ViewNode | null {
+  private resolveCaptured(captured: { id: number; key: string }): ViewNode | null {
+    const direct = this.store.get().model.byId.get(captured.id);
+    if (direct) return direct;
+    const { key } = captured;
     const slash = key.indexOf("/");
     if (slash < 0) return null;
     const frame = key.slice(0, slash);
@@ -292,24 +301,60 @@ export class Viewer {
     return null;
   }
 
-  private makeMouseEvent(node: ViewNode, screen: Point, pressed: boolean): MouseEvent {
+  private makeMouseEvent(node: ViewNode, screen: Point, pressed: boolean, hovered: boolean): MouseEvent {
     const world = this.renderer!.toWorld(screen);
     const local = toLayer(node, { x: world.x - node.frame.x, y: world.y - node.frame.y });
-    return { x: local.x, y: local.y, pressed };
+    return { x: local.x, y: local.y, pressed, hovered };
+  }
+
+  private syncHoverTargets(hit: ViewNode | null, screen: Point, pressed: boolean) {
+    const nextChain = hoveredChain(hit);
+    const nextSet = new Set(nextChain.map((n) => n.id));
+    const prevIds = this.hoveredIds;
+    const prevSet = new Set(prevIds);
+    this.hoveredIds = nextChain.map((n) => n.id);
+    const byId = this.store.get().model.byId;
+
+    for (let i = prevIds.length - 1; i >= 0; i--) {
+      const id = prevIds[i];
+      if (nextSet.has(id)) continue;
+      const node = byId.get(id);
+      if (node && typeof node.props.onMouseLeave === "function") {
+        const ev = this.makeMouseEvent(node, screen, pressed, false);
+        this.host.dispatch(node.frame.name, () => node.props.onMouseLeave(ev));
+      }
+    }
+    for (const node of nextChain) {
+      if (prevSet.has(node.id)) continue;
+      if (typeof node.props.onMouseEnter === "function") {
+        const ev = this.makeMouseEvent(node, screen, pressed, true);
+        this.host.dispatch(node.frame.name, () => node.props.onMouseEnter(ev));
+      }
+    }
+  }
+
+  pointerLeaveAt(screen: Point) {
+    if (this.store.get().tool === "play") {
+      if (this.store.get().clickable) this.store.set({ clickable: false });
+      if (this.renderer && this.captured === null) this.syncHoverTargets(null, screen, false);
+      return;
+    }
+    this.hover(null);
   }
 
   /** Handles primary pointer down in Play mode; returns whether a layer captured the drag. */
   pointerDownAt(screen: Point): boolean {
     if (!this.renderer || this.store.get().tool !== "play") return false;
     const hit = this.renderer.hitTest(screen);
+    this.syncHoverTargets(hit, screen, true);
     const capture = captureTarget(hit);
-    this.capturedKey = capture?.key ?? null;
+    this.captured = capture ? { id: capture.id, key: capture.key } : null;
     const target = mouseTarget(hit, "onMouseDown");
     if (target) {
-      const ev = this.makeMouseEvent(target.node, screen, true);
+      const ev = this.makeMouseEvent(target.node, screen, true, true);
       this.host.dispatch(target.node.frame.name, () => target.handler(ev));
     }
-    return this.capturedKey !== null;
+    return this.captured !== null;
   }
 
   pointerMoveAt(screen: Point, pressed: boolean) {
@@ -318,42 +363,46 @@ export class Viewer {
       if (!pressed) this.hover(this.renderer.hitTest(screen)?.key ?? null);
       return;
     }
-    if (pressed && this.capturedKey !== null) {
-      const base = this.resolveCaptured(this.capturedKey);
+    const hit = this.renderer.hitTest(screen);
+    this.syncHoverTargets(hit, screen, pressed);
+    if (pressed && this.captured !== null) {
+      const base = this.resolveCaptured(this.captured);
       const target = mouseTarget(base, "onMouseMove");
       if (target) {
-        const ev = this.makeMouseEvent(target.node, screen, true);
+        const ev = this.makeMouseEvent(target.node, screen, true, isHovered(target.node, hit));
         this.host.dispatch(target.node.frame.name, () => target.handler(ev));
       }
       return;
     }
-    const hit = this.renderer.hitTest(screen);
-    // Play mode shows the design as a user would see it: no outlines, a hand over clickable/pressable layers.
-    const clickable = isClickable(hit);
-    if (clickable !== this.store.get().clickable) this.store.set({ clickable });
-    const target = mouseTarget(hit, "onMouseMove");
-    if (target) {
-      const ev = this.makeMouseEvent(target.node, screen, false);
-      this.host.dispatch(target.node.frame.name, () => target.handler(ev));
+    if (!pressed) {
+      // Play mode shows the design as a user would see it: no outlines, a hand over clickable/pressable layers.
+      const clickable = isClickable(hit);
+      if (clickable !== this.store.get().clickable) this.store.set({ clickable });
+      const target = mouseTarget(hit, "onMouseMove");
+      if (target) {
+        const ev = this.makeMouseEvent(target.node, screen, false, true);
+        this.host.dispatch(target.node.frame.name, () => target.handler(ev));
+      }
     }
   }
 
   pointerUpAt(screen: Point, opts: { dragged: boolean; canceled: boolean }) {
-    const key = this.capturedKey;
-    this.capturedKey = null;
+    const captured = this.captured;
+    this.captured = null;
     if (!this.renderer || this.store.get().tool !== "play") return;
     if (!opts.canceled) {
-      const base = key !== null ? this.resolveCaptured(key) : null;
       const hit = this.renderer.hitTest(screen);
+      this.syncHoverTargets(hit, screen, false);
+      const base = captured ? this.resolveCaptured(captured) : null;
       const upTarget = mouseTarget(base, "onMouseUp") ?? mouseTarget(hit, "onMouseUp");
       if (upTarget) {
-        const ev = this.makeMouseEvent(upTarget.node, screen, false);
+        const ev = this.makeMouseEvent(upTarget.node, screen, false, isHovered(upTarget.node, hit));
         this.host.dispatch(upTarget.node.frame.name, () => upTarget.handler(ev));
       }
       if (!opts.dragged) {
         const clickTarget = mouseTarget(hit, "onClick");
         if (clickTarget) {
-          const ev = this.makeMouseEvent(clickTarget.node, screen, false);
+          const ev = this.makeMouseEvent(clickTarget.node, screen, false, true);
           this.host.dispatch(clickTarget.node.frame.name, () => clickTarget.handler(ev), true);
         }
       }
@@ -375,7 +424,8 @@ export class Viewer {
   }
 
   setTool(tool: Tool) {
-    this.capturedKey = null;
+    this.captured = null;
+    this.hoveredIds = [];
     this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false, measuring: false });
     if (tool === "play") this.hover(null);
   }
@@ -398,9 +448,10 @@ export class Viewer {
   private play(screen: Point) {
     if (!this.renderer) return;
     const hit = this.renderer.hitTest(screen);
+    this.syncHoverTargets(hit, screen, false);
     const target = mouseTarget(hit, "onClick");
     if (target) {
-      const ev = this.makeMouseEvent(target.node, screen, false);
+      const ev = this.makeMouseEvent(target.node, screen, false, true);
       this.host.dispatch(target.node.frame.name, () => target.handler(ev), true);
     }
   }
@@ -417,7 +468,9 @@ export class Viewer {
 
   /** Puts an artboard back in its initial state, scrolled to the start. */
   resetFrame(frame: string) {
-    this.capturedKey = null;
+    if (this.captured?.key.startsWith(`${frame}/`)) this.captured = null;
+    const byId = this.store.get().model.byId;
+    this.hoveredIds = this.hoveredIds.filter((id) => byId.get(id)?.frame.name !== frame);
     for (const key of this.scrolls.keys()) if (key.startsWith(`${frame}/`)) this.scrolls.delete(key);
     void this.host.reset(frame);
   }

@@ -7,6 +7,7 @@ import type { ResolvedComment } from "../../shared/protocol.ts";
 import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, type MouseEvent, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
+  id: number;
   /** "<artboard>/<path>", stable across rebuilds. */
   key: string;
   path: string;
@@ -51,6 +52,7 @@ export interface ViewFrame {
 export interface Model {
   frames: ViewFrame[];
   nodes: Map<string, ViewNode>;
+  byId: Map<number, ViewNode>;
 }
 
 export interface Point {
@@ -95,7 +97,7 @@ function toLocal(n: { layout: { x: number; y: number; width: number; height: num
   return { x: lx, y: ly };
 }
 
-export const EMPTY_MODEL: Model = { frames: [], nodes: new Map() };
+export const EMPTY_MODEL: Model = { frames: [], nodes: new Map(), byId: new Map() };
 
 export const nodeKey = (frame: string, path: string) => `${frame}/${path}`;
 
@@ -142,6 +144,7 @@ function hydrate(
   path: string,
   parent: ViewNode | null,
   nodes: Model["nodes"],
+  byId: Model["byId"],
   scrolls: ReadonlyMap<string, Point>,
 ): ViewNode {
   // The artboard root sits at its frame's origin, whatever x/y it was given.
@@ -150,6 +153,7 @@ function hydrate(
   if (n.type === "Text") props.children = textContentOf(n);
   const key = nodeKey(frame.name, path);
   const node: ViewNode = {
+    id: n.id,
     type: n.type,
     props,
     layout,
@@ -173,9 +177,10 @@ function hydrate(
     node.scroll = { x: clamp(kept?.x ?? 0, max.x), y: clamp(kept?.y ?? 0, max.y) };
   }
   place(node);
-  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes, scrolls));
-  if (n.mask) node.mask = hydrate(n.mask, frame, path === "" ? "mask" : `${path}.mask`, node, nodes, scrolls);
+  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes, byId, scrolls));
+  if (n.mask) node.mask = hydrate(n.mask, frame, path === "" ? "mask" : `${path}.mask`, node, nodes, byId, scrolls);
   nodes.set(node.key, node);
+  byId.set(node.id, node);
   return node;
 }
 
@@ -215,6 +220,7 @@ export function scrollTarget(node: ViewNode | null, dx = 0, dy = 0): ViewNode | 
 /** Links live artboard trees and places artboards left to right, wrapping into rows. */
 export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string, Point> = new Map()): Model {
   const nodes: Model["nodes"] = new Map();
+  const byId: Model["byId"] = new Map();
   let x = 0;
   let y = 0;
   let rowHeight = 0;
@@ -238,12 +244,12 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
       w,
       h,
     };
-    if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes, scrolls);
+    if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes, byId, scrolls);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);
     return frame;
   });
-  return { frames, nodes };
+  return { frames, nodes, byId };
 }
 
 export type Sizing = "Fixed" | "Fill" | "Hug";
@@ -387,11 +393,28 @@ export function pinPosition(comment: ResolvedComment, model: Model): Point | nul
   return { x: frame.x + at.x, y: frame.y + at.y };
 }
 
-export type MouseHandlerProp = "onClick" | "onMouseDown" | "onMouseMove" | "onMouseUp";
+export type MouseHandlerProp = "onClick" | "onMouseDown" | "onMouseMove" | "onMouseUp" | "onMouseEnter" | "onMouseLeave";
 
 export interface MouseTarget {
   node: ViewNode;
   handler: (event: MouseEvent) => void;
+}
+
+/** Host layers containing `hit`, ordered outermost (artboard root) to innermost (`hit`). */
+export function hoveredChain(hit: ViewNode | null): ViewNode[] {
+  const chain: ViewNode[] = [];
+  for (let n = hit; n; n = n.parent) {
+    if (!n.component) chain.unshift(n);
+  }
+  return chain;
+}
+
+/** Whether `target` is `hit` or an ancestor of `hit`. */
+export function isHovered(target: ViewNode, hit: ViewNode | null): boolean {
+  for (let n = hit; n; n = n.parent) {
+    if (n.id === target.id) return true;
+  }
+  return false;
 }
 
 /** The innermost layer at or above `node` that defines `prop`. */
@@ -415,13 +438,22 @@ export function isClickable(node: ViewNode | null): boolean {
 /**
  * Layer to capture on `pointerdown` in Play mode so dragging drives layer
  * mouse handlers instead of panning the canvas or drag-scrolling.
- * Yields to an inner scrollable container when an ancestor only has `onMouseMove`.
+ * Yields to an inner scrollable container when an ancestor only has `onMouseMove`
+ * or `onMouseEnter`/`onMouseLeave`.
  */
 export function captureTarget(node: ViewNode | null): ViewNode | null {
+  let hasScrollable = false;
+  for (let n = node; n; n = n.parent) {
+    if (n.scroll && n.scrollMax && (n.scrollMax.x > 0 || n.scrollMax.y > 0)) {
+      hasScrollable = true;
+      break;
+    }
+  }
   let passedScroll = false;
   for (let n = node; n; n = n.parent) {
     if (typeof n.props.onMouseDown === "function" || typeof n.props.onMouseUp === "function") return n;
     if (!passedScroll && typeof n.props.onMouseMove === "function") return n;
+    if (!hasScrollable && (typeof n.props.onMouseEnter === "function" || typeof n.props.onMouseLeave === "function")) return n;
     if (n.scroll && n.scrollMax && (n.scrollMax.x > 0 || n.scrollMax.y > 0)) passedScroll = true;
   }
   return null;

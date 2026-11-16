@@ -15,6 +15,8 @@ export interface MouseEvent {
   y: number;
   /** Whether the primary mouse button is currently pressed. */
   pressed: boolean;
+  /** Whether the pointer is currently over this layer (or one of its descendants). */
+  hovered: boolean;
 }
 
 export type Padding = number | [number, number] | [number, number, number, number];

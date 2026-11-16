@@ -39,7 +39,7 @@ const PROP_GROUPS: [title: string, props: Set<string>][] = [
       "opacity", "blur", "backdropBlur", "fit", "src", "viewBox", "d", "fillRule",
     ]),
   ],
-  ["Interaction", new Set(["onClick", "onMouseDown", "onMouseMove", "onMouseUp"])],
+  ["Interaction", new Set(["onClick", "onMouseDown", "onMouseMove", "onMouseUp", "onMouseEnter", "onMouseLeave"])],
 ];
 
 function round(n: number) {

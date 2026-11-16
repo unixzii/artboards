@@ -33,6 +33,7 @@ function Slider({
   accent: string;
   onChange: (next: number) => void;
 }) {
+  const [hovered, setHovered] = useState(false);
   const thumb = 20;
   const fillW = Math.max(8, value * SLIDER_W);
   const thumbX = value * (SLIDER_W - thumb);
@@ -52,10 +53,12 @@ function Slider({
         name={label}
         width={SLIDER_W}
         height={28}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         onMouseDown={(e) => update(e)}
         onMouseMove={(e) => e.pressed && update(e)}
       >
-        <Rect y={10} width={SLIDER_W} height={8} cornerRadius={4} fill="#334155" />
+        <Rect y={10} width={SLIDER_W} height={8} cornerRadius={4} fill={hovered ? "#475569" : "#334155"} />
         <Rect y={10} width={fillW} height={8} cornerRadius={4} fill={accent} />
         <Ellipse
           x={thumbX}
@@ -64,11 +67,64 @@ function Slider({
           height={thumb}
           fill="#ffffff"
           stroke={accent}
-          strokeWidth={3}
-          shadow={{ y: 2, blur: 6, color: "rgba(0, 0, 0, 0.45)" }}
+          strokeWidth={hovered ? 4 : 3}
+          shadow={{ y: 2, blur: hovered ? 10 : 6, color: "rgba(0, 0, 0, 0.45)" }}
         />
       </Frame>
     </Column>
+  );
+}
+
+function TactileButton({
+  name,
+  label,
+  activeLabel,
+  baseFill,
+  hoverFill,
+  pressFill,
+  stroke,
+  textColor,
+  onAction,
+}: {
+  name: string;
+  label: string;
+  activeLabel: string;
+  baseFill: string;
+  hoverFill: string;
+  pressFill: string;
+  stroke?: string;
+  textColor: string;
+  onAction: () => void;
+}) {
+  const [down, setDown] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const active = down && hovered;
+  const cancelled = down && !hovered;
+  const fill = active ? pressFill : cancelled ? "#1e293b" : hovered ? hoverFill : baseFill;
+  const text = active ? activeLabel : cancelled ? "Release to Cancel" : label;
+
+  return (
+    <Row
+      name={name}
+      width="fill"
+      height={40}
+      align="center"
+      justify="center"
+      cornerRadius={10}
+      fill={fill}
+      stroke={active ? "#94a3b8" : hovered ? "#64748b" : stroke}
+      onMouseEnter={(e) => setHovered(e.hovered)}
+      onMouseLeave={(e) => setHovered(e.hovered)}
+      onMouseDown={() => setDown(true)}
+      onMouseUp={(e) => {
+        setDown(false);
+        if (e.hovered) onAction();
+      }}
+    >
+      <Text fontSize={13} fontWeight={600} color={cancelled ? "#cbd5e1" : textColor}>
+        {text}
+      </Text>
+    </Row>
   );
 }
 
@@ -78,7 +134,7 @@ export function LightingControl() {
   const [glow, setGlow] = useState(0.54);
   const [warmth, setWarmth] = useState(0.62);
   const [tint, setTint] = useState(0.35);
-  const [resetPressed, setResetPressed] = useState(false);
+  const [padHovered, setPadHovered] = useState(false);
 
   const color = lampColor(warmth, tint);
   const kelvin = Math.round(6500 - warmth * 3800);
@@ -109,7 +165,7 @@ export function LightingControl() {
               Studio Light
             </Text>
             <Text fontSize={12} color="#94a3b8">
-              Play mode · drag XY pad & sliders
+              Play mode · drag XY pad, sliders & buttons
             </Text>
           </Column>
           <Row
@@ -177,7 +233,9 @@ export function LightingControl() {
             height={PAD_H}
             cornerRadius={14}
             clip
-            stroke="#334155"
+            stroke={padHovered ? "#94a3b8" : "#334155"}
+            onMouseEnter={(e) => setPadHovered(e.hovered)}
+            onMouseLeave={(e) => setPadHovered(e.hovered)}
             onMouseDown={(e) => updatePad(e)}
             onMouseMove={(e) => e.pressed && updatePad(e)}
           >
@@ -204,7 +262,7 @@ export function LightingControl() {
               height={padKnob}
               fill={color}
               stroke="#ffffff"
-              strokeWidth={3}
+              strokeWidth={padHovered ? 4 : 3}
               shadow={{ y: 2, blur: 8, color: "rgba(0, 0, 0, 0.45)" }}
             />
           </Frame>
@@ -228,39 +286,29 @@ export function LightingControl() {
           />
         </Column>
 
-        {/* Tactile Press Buttons */}
+        {/* Tactile Press Buttons (drag outside to cancel using e.hovered) */}
         <Row width="fill" gap={10} align="center">
-          <Row
+          <TactileButton
             name="Reset Button"
-            width="fill"
-            height={40}
-            align="center"
-            justify="center"
-            cornerRadius={10}
-            fill={resetPressed ? "#1e293b" : "#334155"}
-            stroke={resetPressed ? "#64748b" : "#475569"}
-            onMouseDown={() => setResetPressed(true)}
-            onMouseUp={() => setResetPressed(false)}
-            onClick={resetAll}
-          >
-            <Text fontSize={13} fontWeight={600} color="#f8fafc">
-              {resetPressed ? "Release to Reset" : "Reset Preset"}
-            </Text>
-          </Row>
-          <Row
+            label="Reset Preset"
+            activeLabel="Release to Reset"
+            baseFill="#334155"
+            hoverFill="#475569"
+            pressFill="#1e293b"
+            stroke="#475569"
+            textColor="#f8fafc"
+            onAction={resetAll}
+          />
+          <TactileButton
             name="Toggle Power"
-            width="fill"
-            height={40}
-            align="center"
-            justify="center"
-            cornerRadius={10}
-            fill={power ? "#2563eb" : "#1d4ed8"}
-            onClick={() => setPower((p) => !p)}
-          >
-            <Text fontSize={13} fontWeight={600} color="#ffffff">
-              {power ? "Turn Off" : "Turn On"}
-            </Text>
-          </Row>
+            label={power ? "Turn Off" : "Turn On"}
+            activeLabel={power ? "Turning Off…" : "Turning On…"}
+            baseFill="#2563eb"
+            hoverFill="#1d4ed8"
+            pressFill="#1e40af"
+            textColor="#ffffff"
+            onAction={() => setPower((p) => !p)}
+          />
         </Row>
       </Column>
     </Frame>
@@ -278,7 +326,7 @@ interface CardItem {
 }
 
 const CHART_W = 432;
-const CHART_H = 140;
+const CHART_H = 128;
 const SERIES = [24, 38, 31, 56, 48, 72, 65, 89, 82, 94];
 
 function sampleSeries(x: number): { value: number; py: number } {
@@ -291,20 +339,30 @@ function sampleSeries(x: number): { value: number; py: number } {
 }
 
 const BOARD_W = 432;
-const BOARD_H = 236;
+const BOARD_H = 224;
 const CARD_W = 148;
 const CARD_H = 74;
 
+const INITIAL_STEPS = [true, true, false, true, false, false, true, true, true, false, true, false];
+
 const INITIAL_CARDS: CardItem[] = [
-  { id: "a", title: "Wireframes", subtitle: "Drag anywhere", fill: "#fef3c7", stroke: "#f59e0b", x: 20, y: 22 },
-  { id: "b", title: "Prototype", subtitle: "Local coords", fill: "#dbeafe", stroke: "#3b82f6", x: 196, y: 42 },
-  { id: "c", title: "Design QA", subtitle: "Release outside", fill: "#dcfce7", stroke: "#22c55e", x: 108, y: 132 },
+  { id: "a", title: "Wireframes", subtitle: "Drag anywhere", fill: "#fef3c7", stroke: "#f59e0b", x: 20, y: 20 },
+  { id: "b", title: "Prototype", subtitle: "Local coords", fill: "#dbeafe", stroke: "#3b82f6", x: 196, y: 38 },
+  { id: "c", title: "Design QA", subtitle: "Release outside", fill: "#dcfce7", stroke: "#22c55e", x: 108, y: 124 },
 ];
 
 export function InteractiveCanvas() {
   const [scrubX, setScrubX] = useState(258);
   const [pinnedX, setPinnedX] = useState<number | null>(144);
+  const [chartHovered, setChartHovered] = useState(false);
+
+  const [steps, setSteps] = useState<boolean[]>(INITIAL_STEPS);
+  const [paintMode, setPaintMode] = useState<boolean | null>(null);
+  const [hoverStep, setHoverStep] = useState<number | null>(null);
+
   const [cards, setCards] = useState<CardItem[]>(INITIAL_CARDS);
+  const [hoveredCard, setHoveredCard] = useState<string | null>(null);
+  const [boardHovered, setBoardHovered] = useState(false);
   const [drag, setDrag] = useState<{ id: string; dx: number; dy: number } | null>(null);
 
   const sample = sampleSeries(scrubX);
@@ -324,16 +382,24 @@ export function InteractiveCanvas() {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, x, y } : c)));
   };
 
+  const boardStatus = drag
+    ? boardHovered
+      ? `Dragging ${drag.id.toUpperCase()}`
+      : `Outside board (captured)`
+    : boardHovered
+      ? "Board hovered"
+      : "Idle";
+
   return (
-    <Frame width={480} height={600} fill="#ffffff">
-      <Column width="fill" height="fill" padding={24} gap={18} align="stretch">
+    <Frame width={480} height={680} fill="#ffffff">
+      <Column width="fill" height="fill" padding={24} gap={16} align="stretch">
         <Row width="fill" justify="space-between" align="center">
           <Column gap={2}>
             <Text fontSize={20} fontWeight={700} color="#0f172a">
               Pointer Interactions
             </Text>
             <Text fontSize={12} color="#475569">
-              Hover chart to scrub · drag cards on the board
+              Scrub chart · sweep pads while pressed · drag cards
             </Text>
           </Column>
           <Row
@@ -343,6 +409,7 @@ export function InteractiveCanvas() {
             stroke="#cbd5e1"
             onClick={() => {
               setCards(INITIAL_CARDS);
+              setSteps(INITIAL_STEPS);
               setPinnedX(144);
               setScrubX(258);
             }}
@@ -357,10 +424,10 @@ export function InteractiveCanvas() {
         <Column width="fill" gap={6} align="stretch">
           <Row width="fill" justify="space-between" align="center">
             <Text fontSize={13} fontWeight={600} color="#0f172a">
-              Hover Scrubber (onMouseMove)
+              Hover Scrubber (onMouseEnter / onMouseMove)
             </Text>
-            <Text fontSize={12} color="#475569" tabularNums>
-              {pinnedSample ? `Pinned ${Math.round(pinnedSample.value)} pts` : "Click chart to pin"}
+            <Text fontSize={12} color={chartHovered ? "#2563eb" : "#475569"} tabularNums>
+              {chartHovered ? `Live · ${Math.round(sample.value)} pts` : pinnedSample ? `Pinned ${Math.round(pinnedSample.value)} pts` : "Click chart to pin"}
             </Text>
           </Row>
           <Frame
@@ -369,8 +436,11 @@ export function InteractiveCanvas() {
             height={CHART_H}
             cornerRadius={12}
             fill="#f8fafc"
-            stroke="#e2e8f0"
+            stroke={chartHovered ? "#2563eb" : "#e2e8f0"}
+            strokeWidth={chartHovered ? 1.5 : 1}
             clip
+            onMouseEnter={(e) => setChartHovered(e.hovered)}
+            onMouseLeave={(e) => setChartHovered(e.hovered)}
             onMouseMove={(e) => setScrubX(clamp(e.x, 0, CHART_W))}
             onMouseDown={(e) => setPinnedX(clamp(e.x, 0, CHART_W))}
           >
@@ -410,7 +480,7 @@ export function InteractiveCanvas() {
               align="center"
               justify="center"
               cornerRadius={6}
-              fill="#0f172a"
+              fill={chartHovered ? "#2563eb" : "#0f172a"}
             >
               <Text fontSize={11} fontWeight={600} color="#ffffff" tabularNums>
                 {Math.round(sample.value)} pts · {Math.round(scrubX)}px
@@ -419,14 +489,57 @@ export function InteractiveCanvas() {
           </Frame>
         </Column>
 
+        {/* Press-and-Sweep Step Strip (onMouseEnter while mouse down) */}
+        <Column width="fill" gap={6} align="stretch">
+          <Row width="fill" justify="space-between" align="center">
+            <Text fontSize={13} fontWeight={600} color="#0f172a">
+              Drag-to-Paint Pads (onMouseEnter while pressed)
+            </Text>
+            <Text fontSize={12} color="#475569" tabularNums>
+              {steps.filter(Boolean).length}/12 active
+            </Text>
+          </Row>
+          <Row width="fill" height={44} gap={6} align="stretch">
+            {steps.map((on, i) => {
+              const hot = hoverStep === i;
+              return (
+                <Rect
+                  key={i}
+                  name={`Step ${i + 1}`}
+                  width="fill"
+                  height="fill"
+                  cornerRadius={8}
+                  fill={on ? (hot ? "#1d4ed8" : "#2563eb") : hot ? "#cbd5e1" : "#e2e8f0"}
+                  stroke={hot ? "#0f172a" : on ? "#1d4ed8" : "#cbd5e1"}
+                  strokeWidth={hot ? 2 : 1}
+                  onMouseDown={() => {
+                    const next = !steps[i];
+                    setPaintMode(next);
+                    setHoverStep(i);
+                    setSteps((prev) => prev.map((v, idx) => (idx === i ? next : v)));
+                  }}
+                  onMouseEnter={(e) => {
+                    setHoverStep(i);
+                    if (e.pressed && paintMode !== null) {
+                      setSteps((prev) => prev.map((v, idx) => (idx === i ? paintMode : v)));
+                    }
+                  }}
+                  onMouseLeave={() => setHoverStep((cur) => (cur === i ? null : cur))}
+                  onMouseUp={() => setPaintMode(null)}
+                />
+              );
+            })}
+          </Row>
+        </Column>
+
         {/* Draggable Sticker Board */}
         <Column width="fill" gap={6} align="stretch">
           <Row width="fill" justify="space-between" align="center">
             <Text fontSize={13} fontWeight={600} color="#0f172a">
-              Draggable Cards (onMouseDown + onMouseMove)
+              Draggable Cards (parent onMouseEnter / onMouseLeave)
             </Text>
             <Text fontSize={12} color="#475569">
-              {drag ? `Dragging ${drag.id.toUpperCase()}` : "Idle"}
+              {boardStatus}
             </Text>
           </Row>
           <Frame
@@ -435,8 +548,11 @@ export function InteractiveCanvas() {
             height={BOARD_H}
             cornerRadius={14}
             fill="#f1f5f9"
-            stroke="#cbd5e1"
+            stroke={boardHovered ? "#3b82f6" : "#cbd5e1"}
+            strokeWidth={boardHovered ? 1.5 : 1}
             clip
+            onMouseEnter={(e) => setBoardHovered(e.hovered)}
+            onMouseLeave={(e) => setBoardHovered(e.hovered)}
             onMouseMove={(e) => {
               if (e.pressed && drag) moveCard(drag.id, e.x - drag.dx, e.y - drag.dy);
             }}
@@ -444,6 +560,7 @@ export function InteractiveCanvas() {
           >
             {cards.map((card) => {
               const active = drag?.id === card.id;
+              const isOver = hoveredCard === card.id;
               return (
                 <Column
                   key={card.id}
@@ -457,13 +574,15 @@ export function InteractiveCanvas() {
                   justify="center"
                   cornerRadius={12}
                   fill={card.fill}
-                  stroke={card.stroke}
-                  strokeWidth={active ? 2 : 1}
+                  stroke={active ? "#0f172a" : card.stroke}
+                  strokeWidth={active || isOver ? 2 : 1}
                   shadow={
                     active
                       ? { y: 8, blur: 18, color: "rgba(15, 23, 42, 0.2)" }
-                      : { y: 2, blur: 6, color: "rgba(15, 23, 42, 0.08)" }
+                      : { y: isOver ? 4 : 2, blur: isOver ? 10 : 6, color: "rgba(15, 23, 42, 0.1)" }
                   }
+                  onMouseEnter={() => setHoveredCard(card.id)}
+                  onMouseLeave={() => setHoveredCard((cur) => (cur === card.id ? null : cur))}
                   onMouseDown={(e) => {
                     setDrag({ id: card.id, dx: e.x, dy: e.y });
                     // Bring dragged card to front by moving it to the end of the array.
@@ -483,7 +602,7 @@ export function InteractiveCanvas() {
         </Column>
 
         <Text fontSize={12} color="#475569">
-          MouseEvent delivers local (x, y) relative to the handler layer and pressed state.
+          MouseEvent provides local (x, y), pressed, and hovered; enter/leave also fire while pressed.
         </Text>
       </Column>
     </Frame>

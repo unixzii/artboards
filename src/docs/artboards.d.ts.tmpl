@@ -98,7 +98,7 @@ declare module "artboards" {
    */
   export function useVariant<const T extends VariantValue>(name: string, options: readonly T[], initial?: NoInfer<T>): [T, (value: T) => void];
 
-  /** Pointer state passed to layer mouse handlers (`onClick`, `onMouseDown`, `onMouseMove`, `onMouseUp`) in Play mode. */
+  /** Pointer state passed to layer mouse handlers (`onClick`, `onMouseDown`, `onMouseMove`, `onMouseUp`, `onMouseEnter`, `onMouseLeave`) in Play mode. */
   export interface MouseEvent {
     /** Pointer X in this layer's local coordinates (0..width, before rotation and parent scrolling). */
     x: number;
@@ -106,6 +106,8 @@ declare module "artboards" {
     y: number;
     /** Whether the primary mouse button is pressed (`true` on down and while dragging, `false` on hover and up). */
     pressed: boolean;
+    /** Whether the pointer is currently over this layer (`true` on enter/down/click, `false` on leave, and live during captured move/up). */
+    hovered: boolean;
   }
 {{elements}}
 }
