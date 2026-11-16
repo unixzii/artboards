@@ -70,8 +70,8 @@ Save the example above as `design.tsx`, then you can run the following commands 
 | Command | What it does |
 |---|---|
 | `lint <file> [--variant name=value] [--json]` | Type-checks the file, renders every artboard and reports layout problems such as overflow or clipped text. Exits with 1 when there are errors. |
-| `render <file> [-f Name] [--variant name=value] [-s 2] [-o out.png] [--transparent]` | Writes PNG screenshots. The default path is `out/<file>.<Artboard>.png`. Artboards sit on white, as in the viewer, unless `--transparent`. |
-| `inspect <file> [-f Name] [--variant name=value] [--json]` | Prints each artboard's layer tree with its position, size, source line and variants. |
+| `render <file> [-f Name] [--variant name=value] [-s 2] [-o out.png] [--transparent]` | Writes PNG screenshots. The default path is `out/<file>.<Artboard>.png`. Artboards sit on white, as in the viewer, unless `--transparent`. With `--at` and `--to`, it plays the motion and writes one frame or a filmstrip (see below). |
+| `inspect <file> [-f Name] [--variant name=value] [--json]` | Prints each artboard's layer tree with its position, size, source line and variants. With `--at` and `--to`, it lists the layers that change over time and their values at each moment. |
 | `dev <file> [-p 4400] [--host 127.0.0.1]` | Starts the browser viewer, which reloads on every save. Reviewers can inspect layers, switch variants, try Play mode (P) and comment. Keeps running until stopped. |
 | `build <file> [-o dir]` | Writes the viewer and the design as a static site (default: `out/<file>/`) for reviewers who don't have the CLI. |
 | `comments <file> [--all] [--resolve id] [--import file] [--json]` | Lists open review comments, each with the source line of the layer it is on. `--resolve` marks one as done. `--import` adds comments exported from a `build` site. |
@@ -88,6 +88,19 @@ Run `artboards <command> --help` for every option.
 2. Run `artboards comments design.tsx` to list what needs doing. Fix each item, then run
    `artboards comments design.tsx --resolve <id>`. Import the exported comments with
    `artboards comments design.tsx --import design.comments.json`.
+
+### Checking motion
+
+Designs animate with `useSpring` and `useAnimationTime`, and play in the viewer's Play mode. From the CLI,
+`--to` plays a transition between two variant states and `--at` picks the moments, on a clock that steps at
+60 fps, so every run gives the same frames:
+
+```bash
+artboards render design.tsx -f Checkout --to Sheet=open              # filmstrip until the springs settle
+artboards render design.tsx -f Checkout --to Sheet=open --at 120     # one frame, 120 ms in
+artboards inspect design.tsx -f Checkout --to Sheet=open --at 0..400:40   # the values that change, per frame
+artboards render design.tsx -f Splash --at 0..800:100                # from mount: entrances and loops
+```
 
 ## Using it with a coding agent
 
@@ -114,6 +127,8 @@ UI designs in this project are JSX/TSX files written in the Artboards DSL.
 - After every edit, run `artboards lint <file>` and fix every error and warning before moving on.
 - To see the result, run `artboards render <file> --frame <Name> --scale 2` and open the PNG.
   Use `artboards inspect <file> --frame <Name>` for exact positions, sizes and source lines.
+- To check an animation, render a filmstrip of it: `artboards render <file> --frame <Name> --to Name=value` for a
+  change between variants, or `--at 0..800:100` from mount. `inspect` with the same flags gives the numbers.
 - Put each state a reviewer should see (loading, empty, error, a step of a flow) in a variant with
   `useVariant`. Check it with `--variant Name=value` on lint, render and inspect.
 - When asked to address review feedback, run `artboards comments <file>`, fix each comment at the

@@ -100,6 +100,15 @@ export class VariantStore {
     for (const listener of entry.listeners) listener();
   }
 
+  /** Sets a variant from its option written as text (`--to Step=2`), matched as `String(option)`. */
+  setFromText(name: string, raw: string) {
+    const entry = this.entries.get(name);
+    if (!entry) throw new DslError(`No variant named ${show(name)} in this artboard.`);
+    const hit = entry.options.find((o) => String(o) === raw);
+    if (hit === undefined) throw new DslError(`Variant ${show(name)} has no option ${show(raw)}. Options: ${showAll(entry.options)}.`);
+    this.set(name, hit);
+  }
+
   subscribe(name: string, listener: () => void): () => void {
     const listeners = this.entries.get(name)?.listeners;
     listeners?.add(listener);

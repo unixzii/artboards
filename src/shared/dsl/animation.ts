@@ -28,9 +28,25 @@ export class AnimationClock {
     };
   };
 
+  /** Springs subscribe here: they tick like any reader, and also count as motion that has yet to settle. */
+  private springs = new Set<() => void>();
+  readonly subscribeSpring = (listener: () => void) => {
+    const unsubscribe = this.subscribe(listener);
+    this.springs.add(listener);
+    return () => {
+      unsubscribe();
+      this.springs.delete(listener);
+    };
+  };
+
   /** Whether anything renders from the clock and needs ticks. */
   get active(): boolean {
     return this.listeners.size > 0;
+  }
+
+  /** Whether a spring is still moving. Loops reading `useAnimationTime` never settle and don't count. */
+  get moving(): boolean {
+    return this.springs.size > 0;
   }
 
   /** Moves time forward and re-renders everything reading it. */
@@ -69,10 +85,14 @@ const zero = () => 0;
  * every frame.
  */
 export function useAnimationTime(active: boolean = true): number {
+  return useTicks(active, false);
+}
+
+function useTicks(active: boolean, spring: boolean): number {
   const clock = useContext(AnimationContext) ?? STILL;
   const mounted = useRef<number | null>(null);
   if (mounted.current === null) mounted.current = clock.now();
-  const subscribe = active ? clock.subscribe : noSubscribe;
+  const subscribe = !active ? noSubscribe : spring ? clock.subscribeSpring : clock.subscribe;
   useSyncExternalStore(subscribe, active ? clock.snapshot : zero);
   return clock.now() - mounted.current;
 }
@@ -167,6 +187,6 @@ export function useSpring(target: number, options: SpringOptions = {}): number {
   }
   const at = sample(seg.current, now, omega, zeta);
   // Ticks only while moving; a settled spring re-renders when its target changes.
-  useAnimationTime(!at.settled);
+  useTicks(!at.settled, true);
   return at.settled ? target : at.value;
 }

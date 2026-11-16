@@ -198,16 +198,36 @@ function Sheet({ open }: { open: boolean }) {
 looping and procedural motion: `rotation={(t * 0.36) % 360}` turns once a second,
 `opacity={0.5 + 0.5 * Math.sin(t / 300)}` pulses. Read the time from it rather than `Date.now()`.
 
-Motion runs in the viewer's Play mode (P). Everywhere else (the viewer outside Play mode, `render`, `inspect`,
-`lint`) time stands still and every spring shows its target: the state where the motion ends. In the CLI,
-`useAnimationTime()` returns 0, so a loop should look right at time 0.
+Motion runs in the viewer's Play mode (P). Everywhere else (the viewer outside Play mode, and `render`, `inspect`
+and `lint` without `--at`/`--to`) time stands still and every spring shows its target: the state where the motion
+ends. In the CLI, `useAnimationTime()` returns 0 there, so a loop should look right at time 0.
+
+Check motion from the CLI with `--at` and `--to` on `render` and `inspect`. The clock steps at 60 frames a
+second, so every run gives the same frames:
+
+- `--to Sheet=open` starts the artboard at rest in its `--variant` state, switches the variant at 0 ms and plays
+  the transition. This is how to see a state change animate.
+- Without `--to`, the clock starts when the artboard mounts, so entrances (`from`) and loops play.
+- `--at` picks the moments in ms: `120`, `0,80,160`, `0..600:50` (start..end:step), or `auto` (the default with
+  `--to`) for about ten frames from 0 until the springs settle, or a second of a loop.
+
+`render` writes one PNG: with several moments, a filmstrip with each frame labelled by its time. Each run reports
+when the springs settle. `inspect` lists every layer whose box or paint props (`translateX`, `opacity`, `scale`,
+...) change between the moments, with one value per moment, so overshoot and timing can be read off as numbers:
+
+```sh
+artboards render design.tsx -f Checkout --to Sheet=open             # filmstrip of the transition
+artboards inspect design.tsx -f Checkout --to Sheet=open --at 0..400:40
+artboards render design.tsx -f Splash --at 0..800:100               # the entrance, from mount
+```
 
 ## Commands
 
 - `artboards lint <file> [--variant name=value]` — type-check, render every artboard, and report layout problems. Run after every edit.
 - `artboards render <file> [--frame Name] [--variant name=value] [--scale 2] [-o out.png] [--transparent]` — PNG screenshots
-  (default: `out/`), on white unless `--transparent`.
+  (default: `out/`), on white unless `--transparent`. Add `--at`/`--to` for a frame or filmstrip of the motion (see Motion).
 - `artboards inspect <file> [--frame Name] [--variant name=value] [--json]` — layer tree with computed bounds, source lines and variants.
+  With `--at`/`--to`, the layers that change over time and their values at each moment.
 - `artboards comments <file>` — open review comments from a human, with the source line of each layer.
   After addressing one, run `artboards comments <file> --resolve <id>`.
 - `artboards dev <file>` — start the viewer a human uses to review and comment (long-running).

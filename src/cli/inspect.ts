@@ -67,3 +67,31 @@ export function toJson(n: SceneNode): object {
     ...(n.mask ? { mask: toJson(n.mask) } : {}),
   };
 }
+
+/** What a motion trace reports for one layer: the properties that changed, one value per sampled time. */
+export interface TracedLayer {
+  path: string;
+  type: string;
+  name?: string;
+  source?: string;
+  values: Record<string, (number | string | null)[]>;
+}
+
+/**
+ * A table per changing layer: one column per sampled time, one row per
+ * property that changed. `–` marks a time the layer was not there.
+ */
+export function formatTrace(times: number[], layers: TracedLayer[]): string {
+  if (layers.length === 0) return "Nothing changes between these times.";
+  const show = (v: number | string | null) => (v === null ? "–" : typeof v === "string" && v.length > 18 ? `${v.slice(0, 17)}…` : String(v));
+  const keyWidth = Math.max(8, ...layers.flatMap((l) => Object.keys(l.values).map((k) => k.length))) + 4;
+  const colWidth = times.map((t, i) => Math.max(String(t).length, ...layers.flatMap((l) => Object.values(l.values).map((s) => show(s[i]).length))) + 2);
+  const row = (label: string, cells: string[]) => label.padEnd(keyWidth) + cells.map((c, i) => c.padStart(colWidth[i])).join("");
+  const lines = [row("ms", times.map(String))];
+  for (const l of layers) {
+    const name = l.name ? ` "${l.name}"` : "";
+    lines.push(`${l.type}${name}  ${l.path || "(root)"}  ${l.source ?? ""}`.trimEnd());
+    for (const [key, series] of Object.entries(l.values)) lines.push(row(`  ${key}`, series.map(show)));
+  }
+  return lines.join("\n");
+}
