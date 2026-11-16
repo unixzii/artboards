@@ -116,7 +116,50 @@ function invalidateText(node: SceneNode | null) {
   }
 }
 
+/**
+ * Props that only change how a layer paints, never its size or position or
+ * any text metrics: a commit that touches nothing else keeps the layout.
+ */
+const PAINT_ONLY = new Set([
+  "opacity", "blur", "backdropBlur", "rotation", "translateX", "translateY", "scale", "origin",
+  "fill", "shadow", "cornerRadius", "strokeDash", "strokeCap", "strokeJoin", "fillRule", "fit", "name",
+  "onClick", "onMouseDown", "onMouseMove", "onMouseUp", "onMouseEnter", "onMouseLeave",
+]);
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && Object.getPrototypeOf(v) === Object.prototype;
+
+/** Structural equality for prop values: literals written inline (`padding={[0, 12]}`) are new objects every render. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (Array.isArray(a)) return Array.isArray(b) && a.length === b.length && a.every((v, i) => sameValue(v, b[i]));
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && sameValue(a[k], b[k]));
+  }
+  return false;
+}
+
+/** Whether an update can change layout or text metrics, as opposed to paint alone. */
+function affectsLayout(type: string, prev: Record<string, any>, next: Record<string, any>): boolean {
+  for (const key of new Set([...Object.keys(prev), ...Object.keys(next)])) {
+    if (key === "children") {
+      // Only text set directly as `children` lives here; elements and text
+      // instances are tracked through insertions, removals and text updates.
+      const text = (v: unknown) => typeof v === "string" || typeof v === "number";
+      if ((text(prev[key]) || text(next[key])) && !Object.is(prev[key], next[key])) return true;
+      continue;
+    }
+    if (sameValue(prev[key], next[key])) continue;
+    if (type === "Span" || !PAINT_ONLY.has(key)) return true;
+  }
+  return false;
+}
+
+/** Set by any mutation that needs a new layout; read and cleared when the commit ends. */
+let layoutDirty = false;
+
 function append(parent: SceneNode, child: SceneNode, before?: SceneNode) {
+  layoutDirty = true;
   detach(child);
   child.parent = parent;
   if (child.type === MASK_TYPE) {
@@ -131,6 +174,7 @@ function append(parent: SceneNode, child: SceneNode, before?: SceneNode) {
 function detach(child: SceneNode) {
   const p = child.parent;
   if (!p) return;
+  layoutDirty = true;
   if (child === p.mask) {
     p.mask = undefined;
   } else {
@@ -148,7 +192,7 @@ interface HostContext {
 }
 
 let currentPriority = 0;
-const commitListeners = new WeakMap<SceneNode, () => void>();
+const commitListeners = new WeakMap<SceneNode, (layout: boolean) => void>();
 
 const hostConfig: any = {
   supportsMutation: true,
@@ -197,6 +241,7 @@ const hostConfig: any = {
   removeChild: (_parent: SceneNode, child: SceneNode) => detach(child),
   removeChildFromContainer: (_parent: SceneNode, child: SceneNode) => detach(child),
   clearContainer(root: SceneNode) {
+    layoutDirty = true;
     for (const c of root.children) c.parent = null;
     root.children.length = 0;
   },
@@ -206,21 +251,29 @@ const hostConfig: any = {
     if (type === MASK_TYPE) return;
     const props = layerProps(next);
     validateProps(type, props);
+    const layout = affectsLayout(type, instance.props, props);
     instance.props = props;
     instance.componentStack = captureComponentStack(fiber);
-    invalidateText(instance);
+    if (layout) {
+      layoutDirty = true;
+      invalidateText(instance);
+    }
   },
   commitTextUpdate(instance: SceneNode, _old: string, next: string) {
+    layoutDirty = true;
     instance.text = next;
     invalidateText(instance);
   },
   resetTextContent(instance: SceneNode) {
+    layoutDirty = true;
     invalidateText(instance);
   },
 
   prepareForCommit: () => null,
   resetAfterCommit(root: SceneNode) {
-    commitListeners.get(root)?.();
+    const layout = layoutDirty;
+    layoutDirty = false;
+    commitListeners.get(root)?.(layout);
   },
   preparePortalMount() {},
   detachDeletedInstance() {},
@@ -266,8 +319,11 @@ export interface SceneRoot {
 }
 
 export interface SceneRootOptions {
-  /** Called when React commits an internal state/effect update outside `render()` / `unmount()`. */
-  onCommit?: () => void;
+  /**
+   * Called when React commits an internal state/effect update outside `render()` / `unmount()`.
+   * `layout` is false when the commit only changed paint-only props, so the previous layout still holds.
+   */
+  onCommit?: (layout: boolean) => void;
   /** Called when an asynchronous React render throws outside synchronous `render()`. */
   onError?: (error: unknown) => void;
 }
@@ -281,8 +337,8 @@ export function createSceneRoot(opts: SceneRootOptions = {}): SceneRoot {
     else opts.onError?.(e);
   };
   if (opts.onCommit) {
-    commitListeners.set(root, () => {
-      if (!inSyncCall) opts.onCommit!();
+    commitListeners.set(root, (layout) => {
+      if (!inSyncCall) opts.onCommit!(layout);
     });
   }
   const container = (reconciler as any).createContainer(

@@ -200,7 +200,7 @@ export class Viewer {
   private syncScene() {
     const renderer = this.renderer;
     if (!renderer) return;
-    const model = buildModel(this.host.frames, this.scrolls);
+    const model = buildModel(this.host.frames, this.scrolls, this.store.get().model);
     renderer.setModel(model);
 
     const prev = this.store.get();

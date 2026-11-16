@@ -46,7 +46,8 @@ export interface ReconcileOptions {
   variants?: VariantStore;
   /** Drives `useAnimationTime` and `useSpring`. Without one, time stands still and springs show their target. */
   clock?: AnimationClock;
-  onCommit?: () => void;
+  /** See `SceneRootOptions.onCommit`: `layout` is false for paint-only commits. */
+  onCommit?: (layout: boolean) => void;
   onError?: (error: unknown) => void;
 }
 

@@ -54,6 +54,8 @@ interface ManagedArtboard extends MountedArtboard {
   clickError?: Diagnostic;
   pendingInteraction?: boolean;
   relayoutQueued?: boolean;
+  /** A commit since the last layout changed more than paint-only props. */
+  layoutStale?: boolean;
   lintDebounce?: ReturnType<typeof setTimeout>;
 }
 
@@ -256,9 +258,9 @@ export class DesignHost {
           const mounted = reconcileFrame(item.entry, {
             variants: item.variants,
             clock: item.clock,
-            onCommit: () => {
+            onCommit: (layout) => {
               if (item.pendingInteraction) item.clicked = true;
-              this.scheduleRelayout(item);
+              this.scheduleRelayout(item, layout);
             },
             onError: (err) => this.handleAsyncError(item, err),
           });
@@ -332,9 +334,9 @@ export class DesignHost {
       const mounted = reconcileFrame(item.entry, {
         variants: item.variants,
         clock: item.clock,
-        onCommit: () => {
+        onCommit: (layout) => {
           if (item.pendingInteraction) item.clicked = true;
-          this.scheduleRelayout(item);
+          this.scheduleRelayout(item, layout);
         },
         onError: (err) => this.handleAsyncError(item, err),
       });
@@ -388,7 +390,13 @@ export class DesignHost {
     }
   }
 
-  private scheduleRelayout(item: ManagedArtboard) {
+  /**
+   * Rebuilds an artboard's layer tree after a commit. Layout runs only when a
+   * commit since the last one changed more than paint-only props (an animated
+   * `translateX`, `opacity` or color), which keeps motion cheap.
+   */
+  private scheduleRelayout(item: ManagedArtboard, layout = true) {
+    if (layout) item.layoutStale = true;
     if (item.relayoutQueued) return;
     item.relayoutQueued = true;
     void this.enqueue(async () => {
@@ -396,7 +404,10 @@ export class DesignHost {
       if (item.disposed || !item.container) return;
       try {
         const host = currentHostRoot(item.name, item.container);
-        await layoutTree(host, this.engine);
+        if (item.layoutStale) {
+          item.layoutStale = false;
+          await layoutTree(host, this.engine);
+        }
         item.root = groupComponents(host);
         item.error = undefined;
         this.scheduleFrameLint(item);

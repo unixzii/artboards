@@ -47,12 +47,23 @@ export interface ViewFrame {
   y: number;
   w: number;
   h: number;
+  /** This artboard's layers by key, and by host node id. */
+  nodes: Map<string, ViewNode>;
+  byId: Map<number, ViewNode>;
+}
+
+/** Read-only lookup across every artboard of a model. */
+export interface NodeIndex<K> {
+  get(key: K): ViewNode | undefined;
+  has(key: K): boolean;
 }
 
 export interface Model {
   frames: ViewFrame[];
-  nodes: Map<string, ViewNode>;
-  byId: Map<number, ViewNode>;
+  /** Layers by key (`"<artboard>/<path>"`). */
+  nodes: NodeIndex<string>;
+  /** Layers by host node id. */
+  byId: NodeIndex<number>;
 }
 
 export interface Point {
@@ -82,7 +93,28 @@ function toLocal(n: { layout: { x: number; y: number; width: number; height: num
   return apply(invert(m), { x: px, y: py });
 }
 
-export const EMPTY_MODEL: Model = { frames: [], nodes: new Map(), byId: new Map() };
+/** Lookups that go to the artboard holding the layer, so unchanged artboards can be carried over as they are. */
+function modelOf(frames: ViewFrame[]): Model {
+  const byName = new Map(frames.map((f) => [f.name, f]));
+  const byKey = (key: string) => {
+    const slash = key.indexOf("/");
+    return slash < 0 ? undefined : byName.get(key.slice(0, slash))?.nodes.get(key);
+  };
+  const byId = (id: number) => {
+    for (const f of frames) {
+      const node = f.byId.get(id);
+      if (node) return node;
+    }
+    return undefined;
+  };
+  return {
+    frames,
+    nodes: { get: byKey, has: (key) => byKey(key) !== undefined },
+    byId: { get: byId, has: (id) => byId(id) !== undefined },
+  };
+}
+
+export const EMPTY_MODEL: Model = modelOf([]);
 
 export const nodeKey = (frame: string, path: string) => `${frame}/${path}`;
 
@@ -128,8 +160,8 @@ function hydrate(
   frame: ViewFrame,
   path: string,
   parent: ViewNode | null,
-  nodes: Model["nodes"],
-  byId: Model["byId"],
+  nodes: ViewFrame["nodes"],
+  byId: ViewFrame["byId"],
   scrolls: ReadonlyMap<string, Point>,
 ): ViewNode {
   // The artboard root sits at its frame's origin, whatever x/y it was given.
@@ -202,10 +234,16 @@ export function scrollTarget(node: ViewNode | null, dx = 0, dy = 0): ViewNode | 
   return first;
 }
 
-/** Links live artboard trees and places artboards left to right, wrapping into rows. */
-export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string, Point> = new Map()): Model {
-  const nodes: Model["nodes"] = new Map();
-  const byId: Model["byId"] = new Map();
+const sameVariants = (a: VariantInfo[], b: VariantInfo[]) =>
+  a.length === b.length && a.every((v, i) => v.name === b[i].name && Object.is(v.value, b[i].value) && v.options.length === b[i].options.length);
+
+/**
+ * Links live artboard trees and places artboards left to right, wrapping into
+ * rows. Artboards whose tree, state and place are the same as in `prev` are
+ * carried over untouched, so an animating artboard doesn't rebuild the rest.
+ */
+export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string, Point> = new Map(), prev: Model = EMPTY_MODEL): Model {
+  const before = new Map(prev.frames.map((f) => [f.name, f]));
   let x = 0;
   let y = 0;
   let rowHeight = 0;
@@ -217,24 +255,41 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
       y += rowHeight + GAP + 40;
       rowHeight = 0;
     }
-    const frame: ViewFrame = {
-      name: input.name,
-      error: input.error,
-      variants: input.variants.list(),
-      modified: input.modified,
-      root: null,
-      source: input.root,
-      x,
-      y,
-      w,
-      h,
-    };
-    if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes, byId, scrolls);
+    const variants = input.variants.list();
+    const old = before.get(input.name);
+    const kept =
+      old &&
+      input.root &&
+      old.source === input.root &&
+      old.error === input.error &&
+      old.modified === input.modified &&
+      old.x === x &&
+      old.y === y &&
+      old.w === w &&
+      old.h === h &&
+      sameVariants(old.variants, variants);
+    const frame: ViewFrame = kept
+      ? old
+      : {
+          name: input.name,
+          error: input.error,
+          variants,
+          modified: input.modified,
+          root: null,
+          source: input.root,
+          x,
+          y,
+          w,
+          h,
+          nodes: new Map(),
+          byId: new Map(),
+        };
+    if (!kept && input.root) frame.root = hydrate(input.root, frame, "", null, frame.nodes, frame.byId, scrolls);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);
     return frame;
   });
-  return { frames, nodes, byId };
+  return modelOf(frames);
 }
 
 export type Sizing = "Fixed" | "Fill" | "Hug";
