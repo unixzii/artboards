@@ -36,7 +36,7 @@ const PROP_GROUPS: [title: string, props: Set<string>][] = [
     "Appearance",
     new Set([
       "fill", "stroke", "strokeWidth", "strokeAlign", "strokeDash", "strokeCap", "strokeJoin", "cornerRadius",
-      "opacity", "backdropBlur", "fit", "src", "viewBox", "d", "fillRule",
+      "opacity", "blur", "backdropBlur", "fit", "src", "viewBox", "d", "fillRule",
     ]),
   ],
   ["Interaction", new Set(["onClick"])],

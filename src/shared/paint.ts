@@ -40,18 +40,27 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
 
   if (node.mask) canvas.saveLayer();
 
-  // Frosted glass reads what is already on the canvas, so it goes before any
-  // opacity layer (which starts out empty).
+  // Frosted glass samples the backdrop before the layer's own paint is isolated.
   const group = isComponentNode(node) || node.type === MASK_TYPE;
-  const box = group || node.type === "Text" || node.type === "Path" ? null : boxGeometry(node);
-  if (box && (p.backdropBlur ?? 0) > 0 && w > 0 && h > 0) {
-    backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipRRect(box.rrect(ck, ZERO), op, true));
+  const isPath = node.type === "Path";
+  const path = isPath ? buildRenderPath(ck, node) : null;
+  const box = group || node.type === "Text" || isPath ? null : boxGeometry(node);
+  if (p.backdropBlur > 0 && w > 0 && h > 0) {
+    if (box) backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipRRect(box.rrect(ck, ZERO), op, true));
+    if (path) backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipPath(path, op, true));
   }
 
   const opacity = typeof p.opacity === "number" ? Math.max(0, Math.min(1, p.opacity)) : 1;
-  if (opacity < 1) {
+  const blur = p.blur ?? 0;
+  const isolate = opacity < 1 || blur > 0;
+  if (isolate) {
     const layer = new ck.Paint();
     layer.setAlphaf(opacity);
+    if (blur > 0) {
+      const filter = ck.ImageFilter.MakeBlur(blur / 2, blur / 2, ck.TileMode.Decal, null);
+      layer.setImageFilter(filter);
+      filter.delete();
+    }
     canvas.saveLayer(layer);
     layer.delete();
   }
@@ -69,13 +78,13 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
     const draw = () => canvas.drawParagraph(para, 0, 0);
     if (shadows.length > 0 && w > 0 && h > 0) drawFilteredShadows(ck, canvas, shadows, draw);
     draw();
-  } else if (node.type === "Path") {
-    paintPathNode(ck, canvas, node);
+  } else if (path) {
+    paintPathNode(ck, canvas, node, path);
   } else if (box) {
     paintBox(engine, canvas, node, box, greekBelow);
   }
 
-  if (opacity < 1) canvas.restore();
+  if (isolate) canvas.restore();
   if (node.mask) {
     // The transparent pixels of this isolated layer also take part in DstIn.
     const mask = new ck.Paint();
@@ -327,17 +336,10 @@ function drawPathInsetShadows(ck: CanvasKit, canvas: Canvas, path: Path, shadows
 
 // ------------------------------------------------------------------ paths
 
-function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode) {
+function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode, path: Path) {
   const { width: w, height: h } = node.layout;
   const p = node.props;
-  const path = buildRenderPath(ck, node);
-  if (!path) return;
-
   try {
-    if ((p.backdropBlur ?? 0) > 0 && w > 0 && h > 0) {
-      backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipPath(path, op, true));
-    }
-
     const { drop, inset } = normalizeShadows(p.shadow);
     const draw = () => drawPathFillAndStroke(ck, canvas, path, p, w, h);
     if (drop.length > 0 && (p.fill || p.stroke)) {

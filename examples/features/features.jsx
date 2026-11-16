@@ -75,7 +75,7 @@ export function Layout() {
 
 export function Paint() {
   return (
-    <Frame width={480} height={620} fill="#fafaf9">
+    <Frame width={480} height={760} fill="#fafaf9">
       <Column width="fill" padding={24} gap={18} align="stretch">
         <Caption>GRADIENT FILLS · LINEAR / RADIAL</Caption>
         <Row gap={12} height={96}>
@@ -123,6 +123,12 @@ export function Paint() {
           </Row>
           <Path x={396} y={16} width={28} height={28} viewBox="0 0 24 24" rotation={45} d="M12 2 L15 9 L22 9 L16.5 13.5 L18.5 21 L12 16.5 L5.5 21 L7.5 13.5 L2 9 L9 9 Z" fill="#f59e0b" />
         </Frame>
+
+        <Caption>LAYER BLUR · 0 PX / 12 PX</Caption>
+        <Row gap={24}>
+          <Image src={latte} width={160} height={120} cornerRadius={12} />
+          <Image src={latte} width={160} height={120} cornerRadius={12} blur={12} />
+        </Row>
       </Column>
     </Frame>
   );

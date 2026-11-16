@@ -51,6 +51,8 @@ cannot say.
 - A bottom sheet: `cornerRadius={[20, 20, 0, 0]}`. A bottom border only: `stroke="#e5e7eb" strokeWidth={[0, 0, 1, 0]}`.
 - Figma's inner shadow is `shadow={{ y: 1, blur: 2, color: "rgba(0,0,0,0.12)", inset: true }}`; mix drop and inset
   shadows in one array. Text takes drop shadows only.
+- `blur={12}` applies a 12px Gaussian blur to the layer and its descendants without changing layout.
+  When used with `mask`, the mask clips the blurred result. Use `backdropBlur` for content behind the layer.
 
 ## Masks
 
