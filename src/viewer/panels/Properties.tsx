@@ -1,6 +1,6 @@
 import { Check, Component, Copy, RotateCcw } from "lucide-react";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { ButtonGroup, Empty, GroupButton, LinkButton } from "../components/primitives.tsx";
+import { ButtonGroup, Empty, GroupButton, LinkButton, Select } from "../components/primitives.tsx";
 import { Section } from "../components/Section.tsx";
 import { useViewer, useViewerState } from "../core/context.ts";
 import { enclosingComponent, sizing, type ViewFrame, type ViewNode } from "../core/model.ts";
@@ -236,13 +236,13 @@ function VariantPicker({ frame, variant }: { frame: string; variant: VariantInfo
     );
   }
   return (
-    <select aria-label={variant.name} value={current} onChange={(e) => pick(Number(e.target.value))}>
+    <Select label={variant.name} value={current} onChange={(v) => pick(Number(v))}>
       {labels.map((label, i) => (
         <option key={label} value={i}>
           {title(i)}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 

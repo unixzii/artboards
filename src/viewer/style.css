@@ -345,7 +345,25 @@ svg.lucide { flex: none; display: block; }
 .variant { display: flex; gap: 8px; align-items: center; padding: 3px 12px; }
 .variant .k { color: var(--muted); width: 96px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .variant .group { flex: 0 1 auto; min-width: 0; }
-.variant select { min-width: 0; max-width: 100%; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
+.variant .select { min-width: 0; max-width: 100%; }
+/* Select: the native control with its arrow hidden, a lucide chevron laid over the right end. */
+.select { position: relative; display: inline-flex; align-items: center; }
+.select select {
+  appearance: none;
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--track);
+  border: 0;
+  border-radius: 8px;
+  padding: 4px 28px 4px 10px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.select select:hover { background: color-mix(in srgb, var(--track), var(--text) 5%); }
+.select select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.select > svg { position: absolute; right: 9px; color: var(--muted); pointer-events: none; }
 .text-content { padding: 3px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Stage */

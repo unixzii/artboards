@@ -1,6 +1,7 @@
 // Domain-agnostic presentational primitives shared across viewer panels and toolbar.
 
-import type { MouseEvent, ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
+import type { ChangeEvent, MouseEvent, ReactNode } from "react";
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
@@ -55,6 +56,18 @@ export function GroupButton(props: { id?: string; title: string; active?: boolea
     <button type="button" id={props.id} title={props.title} className={props.active ? "on" : undefined} aria-pressed={props.active} onClick={props.onClick}>
       {props.children}
     </button>
+  );
+}
+
+/** A native select without the browser's arrow: a chevron icon instead, on the same track as a segmented ButtonGroup. */
+export function Select(props: { label?: string; value: string | number; onChange: (value: string) => void; children: ReactNode }) {
+  return (
+    <span className="select">
+      <select aria-label={props.label} value={props.value} onChange={(e: ChangeEvent<HTMLSelectElement>) => props.onChange(e.target.value)}>
+        {props.children}
+      </select>
+      <ChevronDown size={14} aria-hidden />
+    </span>
   );
 }
 
