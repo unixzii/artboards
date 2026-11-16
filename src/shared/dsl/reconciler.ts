@@ -318,6 +318,11 @@ export function createSceneRoot(opts: SceneRootOptions = {}): SceneRoot {
   };
 }
 
+/** Runs an interaction callback and flushes any resulting React state updates in a single synchronous commit. */
+export function flushSceneSync(fn: () => void): void {
+  (reconciler as any).flushSyncFromReconciler(fn);
+}
+
 // ------------------------------------------------------------------ layer tree
 //
 // React owns the host tree: it keeps mutating it as long as the root is

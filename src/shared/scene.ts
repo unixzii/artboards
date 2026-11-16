@@ -7,6 +7,16 @@ export interface Box {
   height: number;
 }
 
+/** Pointer state passed to layer mouse handlers in the viewer's Play mode. */
+export interface MouseEvent {
+  /** Pointer X in this layer's own coordinates (0..width). */
+  x: number;
+  /** Pointer Y in this layer's own coordinates (0..height). */
+  y: number;
+  /** Whether the primary mouse button is currently pressed. */
+  pressed: boolean;
+}
+
 export type Padding = number | [number, number] | [number, number, number, number];
 
 export interface Shadow {

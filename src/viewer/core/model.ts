@@ -4,7 +4,7 @@
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
-import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, type MouseEvent, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   /** "<artboard>/<path>", stable across rebuilds. */
@@ -387,10 +387,42 @@ export function pinPosition(comment: ResolvedComment, model: Model): Point | nul
   return { x: frame.x + at.x, y: frame.y + at.y };
 }
 
-/** The onClick of the innermost layer at or above `node` that has one. */
-export function clickHandler(node: ViewNode | null): (() => void) | null {
+export type MouseHandlerProp = "onClick" | "onMouseDown" | "onMouseMove" | "onMouseUp";
+
+export interface MouseTarget {
+  node: ViewNode;
+  handler: (event: MouseEvent) => void;
+}
+
+/** The innermost layer at or above `node` that defines `prop`. */
+export function mouseTarget(node: ViewNode | null, prop: MouseHandlerProp): MouseTarget | null {
   for (let n = node; n; n = n.parent) {
-    if (typeof n.props.onClick === "function") return n.props.onClick;
+    if (typeof n.props[prop] === "function") return { node: n, handler: n.props[prop] };
+  }
+  return null;
+}
+
+/** Whether `node` or an ancestor shows a pointer hand cursor in Play mode (`onClick` / `onMouseDown` / `onMouseUp`). */
+export function isClickable(node: ViewNode | null): boolean {
+  for (let n = node; n; n = n.parent) {
+    if (typeof n.props.onClick === "function" || typeof n.props.onMouseDown === "function" || typeof n.props.onMouseUp === "function") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Layer to capture on `pointerdown` in Play mode so dragging drives layer
+ * mouse handlers instead of panning the canvas or drag-scrolling.
+ * Yields to an inner scrollable container when an ancestor only has `onMouseMove`.
+ */
+export function captureTarget(node: ViewNode | null): ViewNode | null {
+  let passedScroll = false;
+  for (let n = node; n; n = n.parent) {
+    if (typeof n.props.onMouseDown === "function" || typeof n.props.onMouseUp === "function") return n;
+    if (!passedScroll && typeof n.props.onMouseMove === "function") return n;
+    if (n.scroll && n.scrollMax && (n.scrollMax.x > 0 || n.scrollMax.y > 0)) passedScroll = true;
   }
   return null;
 }

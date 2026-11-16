@@ -71,6 +71,18 @@ const box = {
     type: { kind: "handler" },
     doc: "Runs when a reviewer clicks this layer in the viewer's Play mode (the innermost layer with a handler wins). Update state here: `useState`, or a variant setter so the state can also be picked without clicking.",
   },
+  onMouseDown: {
+    type: { kind: "handler" },
+    doc: "Runs when the primary mouse button is pressed on this layer in the viewer's Play mode (the innermost layer with a handler wins).",
+  },
+  onMouseMove: {
+    type: { kind: "handler" },
+    doc: "Runs when the pointer moves over this layer (or drags after pressing on it) in the viewer's Play mode.",
+  },
+  onMouseUp: {
+    type: { kind: "handler" },
+    doc: "Runs when a pressed mouse button is released in the viewer's Play mode.",
+  },
 } satisfies Record<string, PropDef>;
 
 const shadowProp: PropDef = {
@@ -286,6 +298,10 @@ export const HINTS: Record<string, string> = {
   gridColumn: "use `colSpan`",
   gridRow: "use `rowSpan`",
   span: "use `colSpan` / `rowSpan`",
+  onPointerDown: "use `onMouseDown`",
+  onPointerMove: "use `onMouseMove`",
+  onPointerUp: "use `onMouseUp`",
+  onPress: "use `onClick`",
 };
 
 export const ELEMENT_HINTS: Record<string, string> = {
@@ -553,7 +569,7 @@ function tsType(t: PropType, prop: string): string {
     case "viewBox":
       return "ViewBox";
     case "handler":
-      return "() => void";
+      return "(event: MouseEvent) => void";
     case "jsx":
       return "ReactElement | false | null";
     case "enum":

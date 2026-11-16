@@ -39,7 +39,7 @@ const PROP_GROUPS: [title: string, props: Set<string>][] = [
       "opacity", "blur", "backdropBlur", "fit", "src", "viewBox", "d", "fillRule",
     ]),
   ],
-  ["Interaction", new Set(["onClick"])],
+  ["Interaction", new Set(["onClick", "onMouseDown", "onMouseMove", "onMouseUp"])],
 ];
 
 function round(n: number) {
@@ -251,7 +251,7 @@ function Variants({ frame }: { frame: ViewFrame }) {
   const viewer = useViewer();
   if (frame.variants.length === 0 && !frame.modified) return null;
   const reset = frame.modified && (
-    <LinkButton title="Reset every variant and clicked state" onClick={() => viewer.resetFrame(frame.name)}>
+    <LinkButton title="Reset every variant and interaction state" onClick={() => viewer.resetFrame(frame.name)}>
       <RotateCcw size={11} />
       <span>Reset</span>
     </LinkButton>
@@ -266,7 +266,7 @@ function Variants({ frame }: { frame: ViewFrame }) {
           <VariantPicker frame={frame.name} variant={v} />
         </div>
       ))}
-      {frame.variants.length === 0 && <div className="note">Changed by clicks in Play mode.</div>}
+      {frame.variants.length === 0 && <div className="note">Changed in Play mode.</div>}
     </Group>
   );
 }

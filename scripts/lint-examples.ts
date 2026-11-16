@@ -11,6 +11,7 @@ const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const EXAMPLES = [
   "examples/page1.jsx",
   "examples/path.jsx",
+  "examples/interaction.tsx",
   "examples/features/features.jsx",
   "examples/features/illustrations.jsx",
   "examples/roastery/index.tsx",

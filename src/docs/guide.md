@@ -127,17 +127,32 @@ artboard to switch its variants in the Properties panel.
 
 ## Interaction
 
-Any layer element takes `onClick`. It runs when a reviewer clicks the layer in the viewer's Play mode
-(P); the innermost layer with a handler under the pointer wins. Screenshots, `inspect` and `lint`
-always show the state before any click. Keep a state that matters for review in a variant, so it
-can be picked without clicking and rendered from the CLI:
+Any layer element takes `onClick`, `onMouseDown`, `onMouseMove`, and `onMouseUp`. They run in the
+viewer's Play mode (P); the innermost layer with a matching handler under the pointer wins. Each handler
+receives `event: MouseEvent` (`{ x, y, pressed }`), where `x` and `y` are in the handler layer's own
+local coordinates (before rotation and scrolling) and `pressed` tells whether the primary mouse button
+is held down. While dragging after a press on an interactive layer, `onMouseMove` and `onMouseUp` stay
+captured by that layer even if the pointer moves outside its bounds.
+
+Screenshots, `inspect` and `lint` always show the initial state. Keep states that matter for review in
+a variant so they can be picked without interacting and rendered from the CLI:
 
 ```tsx
 const [tab, setTab] = useVariant("Tab", ["Orders", "Favourites"]);
 <Text onClick={() => setTab("Favourites")}>Favourites</Text>
 ```
 
-Use `useState` for state nobody needs to review on its own, such as a toggle's pressed look.
+Use `useState` with pointer events for transient or continuous UI interactions such as sliders, XY pads,
+pressed button feedback, or hover scrubbers:
+
+```tsx
+const [value, setValue] = useState(0.4);
+const update = (x: number) => setValue(Math.max(0, Math.min(1, x / 200)));
+<Frame width={200} height={24} onMouseDown={(e) => update(e.x)} onMouseMove={(e) => e.pressed && update(e.x)}>
+  <Rect y={10} width="fill" height={4} cornerRadius={2} fill="#e4e4e7" />
+  <Rect y={10} width={Math.max(4, value * 200)} height={4} cornerRadius={2} fill="#2563eb" />
+</Frame>
+```
 
 A long list goes in a container with `scroll="vertical"` (or `"horizontal"`, `"both"`) and a fixed or
 `"fill"` size; it clips its content, and reviewers scroll it in Play mode with the wheel or by dragging.

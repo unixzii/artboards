@@ -12,6 +12,7 @@ import {
   currentHostRoot,
   errorToDiagnostic,
   extractFrames,
+  flushSceneSync,
   reconcileFrame,
   type BundleMeta,
   type FrameEntry,
@@ -42,10 +43,13 @@ interface ManagedArtboard extends MountedArtboard {
   disposed: boolean;
   container: SceneNode | null;
   unmount?: () => void;
-  /** Set once a click handler ran; only a reset or a new bundle clears it. */
+  /** Set once an interaction handler commits state, is clicked, or throws; only a reset or a new bundle clears it. */
   clicked: boolean;
-  /** The last click handler that threw. */
+  /** The last interaction handler that threw. */
   clickError?: Diagnostic;
+  pendingInteraction?: boolean;
+  relayoutQueued?: boolean;
+  lintDebounce?: ReturnType<typeof setTimeout>;
 }
 
 function managed(entry: FrameEntry, variants: VariantStore): ManagedArtboard {
@@ -110,6 +114,8 @@ export class DesignHost {
   private teardown(f: ManagedArtboard) {
     if (f.disposed) return;
     f.disposed = true;
+    clearTimeout(f.lintDebounce);
+    f.lintDebounce = undefined;
     if (f.container) releaseParagraphs(f.container);
     const unmount = f.unmount;
     f.container = null;
@@ -177,7 +183,10 @@ export class DesignHost {
         try {
           const mounted = reconcileFrame(item.entry, {
             variants: item.variants,
-            onCommit: () => this.scheduleRelayout(item),
+            onCommit: () => {
+              if (item.pendingInteraction) item.clicked = true;
+              this.scheduleRelayout(item);
+            },
             onError: (err) => this.handleAsyncError(item, err),
           });
           item.container = mounted.container;
@@ -249,7 +258,10 @@ export class DesignHost {
     try {
       const mounted = reconcileFrame(item.entry, {
         variants: item.variants,
-        onCommit: () => this.scheduleRelayout(item),
+        onCommit: () => {
+          if (item.pendingInteraction) item.clicked = true;
+          this.scheduleRelayout(item);
+        },
         onError: (err) => this.handleAsyncError(item, err),
       });
       item.container = mounted.container;
@@ -278,35 +290,42 @@ export class DesignHost {
     });
   }
 
-  /** Runs a layer's onClick on behalf of the reviewer. The artboard counts as modified from now on. */
-  click(name: string, handler: () => void) {
+  /** Runs a layer interaction handler on behalf of the reviewer. Marks the artboard modified when clicked, when state commits, or on error. */
+  dispatch(name: string, run: () => void, markModified = false) {
     const item = this.managed.find((f) => f.name === name);
     if (!item || item.disposed) return;
     const wasModified = item.modified;
     const hadError = !!item.clickError;
-    item.clicked = true;
+    if (markModified) item.clicked = true;
+    item.pendingInteraction = true;
     try {
-      handler();
+      flushSceneSync(run);
       item.clickError = undefined;
     } catch (e) {
+      item.clicked = true;
       item.clickError = this.toDiagnostic(e, item.name);
+    } finally {
+      item.pendingInteraction = false;
     }
-    // The state change, if any, arrives through the commit; this covers the flag and errors.
-    if (!wasModified || hadError || item.clickError) {
+    // A state change schedules relayout through onCommit; this covers immediate flags and handler errors.
+    if (item.modified !== wasModified || hadError || item.clickError) {
       this.syncDiagnostics();
       this.onChange();
     }
   }
 
   private scheduleRelayout(item: ManagedArtboard) {
+    if (item.relayoutQueued) return;
+    item.relayoutQueued = true;
     void this.enqueue(async () => {
+      item.relayoutQueued = false;
       if (item.disposed || !item.container) return;
       try {
         const host = currentHostRoot(item.name, item.container);
         await layoutTree(host, this.engine);
         item.root = groupComponents(host);
-        item.warnings = checkFrame({ name: item.name, root: item.root, engine: this.engine });
         item.error = undefined;
+        this.scheduleFrameLint(item);
       } catch (e) {
         this.teardown(item);
         item.root = null;
@@ -316,6 +335,17 @@ export class DesignHost {
       this.syncDiagnostics();
       this.onChange();
     });
+  }
+
+  private scheduleFrameLint(item: ManagedArtboard) {
+    clearTimeout(item.lintDebounce);
+    item.lintDebounce = setTimeout(() => {
+      item.lintDebounce = undefined;
+      if (item.disposed || !item.root || item.error) return;
+      item.warnings = checkFrame({ name: item.name, root: item.root, engine: this.engine });
+      this.syncDiagnostics();
+      this.onDiagnostics();
+    }, 120);
   }
 
   private handleAsyncError(item: ManagedArtboard, err: unknown) {

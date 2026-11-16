@@ -15,6 +15,7 @@ const DRAG_THRESHOLD = 4;
 export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanvasElement): () => void {
   const pointers = new Map<number, Point>();
   let dragged = false;
+  let capturedLayer = false;
   let downAt: Point = { x: 0, y: 0 };
   const abort = new AbortController();
   const on = <K extends keyof HTMLElementEventMap>(
@@ -37,6 +38,10 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
     if (pointers.size === 1) {
       dragged = false;
       downAt = p;
+      capturedLayer = e.button === 0 && viewer.pointerDownAt(p);
+    } else if (pointers.size === 2 && capturedLayer) {
+      capturedLayer = false;
+      viewer.pointerUpAt(p, { dragged: true, canceled: true });
     }
   });
 
@@ -45,7 +50,7 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
     const p = local(e);
     const prev = pointers.get(e.pointerId);
     if (!prev) {
-      if (e.target === canvas) viewer.hoverAt(p);
+      if (e.target === canvas) viewer.pointerMoveAt(p, false);
       return;
     }
     if (pointers.size === 2) {
@@ -59,10 +64,14 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
     } else {
       if (!dragged && Math.hypot(p.x - downAt.x, p.y - downAt.y) > DRAG_THRESHOLD) {
         dragged = true;
-        stage.classList.add("panning");
+        if (!capturedLayer) stage.classList.add("panning");
       }
-      // Content follows the pointer, so it scrolls the opposite way to the drag.
-      if (dragged && !viewer.scrollAt(downAt, prev.x - p.x, prev.y - p.y)) viewer.panBy(p.x - prev.x, p.y - prev.y);
+      if (capturedLayer) {
+        viewer.pointerMoveAt(p, true);
+      } else if (dragged && !viewer.scrollAt(downAt, prev.x - p.x, prev.y - p.y)) {
+        // Content follows the pointer, so it scrolls the opposite way to the drag.
+        viewer.panBy(p.x - prev.x, p.y - prev.y);
+      }
     }
     pointers.set(e.pointerId, p);
   });
@@ -70,8 +79,16 @@ export function attachInput(viewer: Viewer, stage: HTMLElement, canvas: HTMLCanv
   const release = (e: PointerEvent) => {
     if (!pointers.delete(e.pointerId)) return;
     stage.classList.remove("panning");
-    if (dragged || e.type === "pointercancel" || pointers.size) return;
-    viewer.clickAt(local(e));
+    if (pointers.size) return;
+    const wasCaptured = capturedLayer;
+    capturedLayer = false;
+    const p = local(e);
+    const canceled = e.type === "pointercancel";
+    if (wasCaptured) {
+      viewer.pointerUpAt(p, { dragged, canceled });
+    } else if (!dragged && !canceled && e.button === 0) {
+      viewer.clickAt(p);
+    }
   };
   on(stage, "pointerup", release);
   on(stage, "pointercancel", release);

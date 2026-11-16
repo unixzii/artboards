@@ -44,7 +44,7 @@ export function Toolbar() {
         <GroupButton id="tool-comment" title="Add a comment (C)" active={tool === "comment"} onClick={() => viewer.setTool("comment")}>
           <MessageSquarePlus size={16} />
         </GroupButton>
-        <GroupButton id="tool-play" title="Play: click layers to run their onClick (P)" active={tool === "play"} onClick={() => viewer.setTool("play")}>
+        <GroupButton id="tool-play" title="Play: interact with layers in the design (P)" active={tool === "play"} onClick={() => viewer.setTool("play")}>
           <Play size={16} />
         </GroupButton>
       </ButtonGroup>

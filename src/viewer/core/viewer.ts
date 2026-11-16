@@ -6,13 +6,13 @@ import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantValue } from "../../shared/dsl/variants.ts";
 import type { RenderEngine } from "../../shared/engine.ts";
 import type { BuildPayload, Comment, ResolvedComment } from "../../shared/protocol.ts";
-import type { SceneNode } from "../../shared/scene.ts";
+import type { MouseEvent, SceneNode } from "../../shared/scene.ts";
 import { DesignHost } from "../runtime/host.ts";
 import type { Backend } from "./backend.ts";
-import { buildModel, clickHandler, describe, EMPTY_MODEL, nodeKey, scrollNode, scrollTarget, toLayer, type ViewFrame, type Model, type Point, type ViewNode } from "./model.ts";
+import { buildModel, captureTarget, describe, EMPTY_MODEL, isClickable, mouseTarget, nodeKey, scrollNode, scrollTarget, toLayer, type ViewFrame, type Model, type Point, type ViewNode } from "./model.ts";
 import { createStore } from "./store.ts";
 
-/** select: inspect layers; comment: pin a comment to a layer; play: run the design's onClick handlers. */
+/** select: inspect layers; comment: pin a comment to a layer; play: run the design's interaction handlers. */
 export type Tool = "select" | "comment" | "play";
 
 /** A comment being written: the layer it is for and where on the canvas it was started. */
@@ -106,6 +106,8 @@ export class Viewer {
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   /** Scroll offsets by layer key; viewer state only, kept across rebuilds and tools. */
   private scrolls = new Map<string, Point>();
+  /** Layer key captured on primary pointerdown in Play mode. */
+  private capturedKey: string | null = null;
 
   constructor(engine: RenderEngine, backend: Backend, createStage: StageBackendFactory) {
     this.backend = backend;
@@ -265,19 +267,99 @@ export class Viewer {
   }
 
   hover(key: string | null) {
-    this.store.set({ hovered: key });
+    this.store.set({ hovered: key, ...(key === null && this.store.get().clickable ? { clickable: false } : {}) });
     this.syncHighlight();
   }
 
   hoverAt(screen: Point) {
-    const node = this.renderer?.hitTest(screen) ?? null;
-    if (this.store.get().tool === "play") {
-      // Play mode shows the design as a user would see it: no outlines, a hand over clickable layers.
-      const clickable = !!clickHandler(node);
-      if (clickable !== this.store.get().clickable) this.store.set({ clickable });
+    this.pointerMoveAt(screen, false);
+  }
+
+  private resolveCaptured(key: string): ViewNode | null {
+    const slash = key.indexOf("/");
+    if (slash < 0) return null;
+    const frame = key.slice(0, slash);
+    let path: string | null = key.slice(slash + 1);
+    while (path !== null) {
+      const found = this.node(`${frame}/${path}`);
+      if (found) return found;
+      if (path === "") path = null;
+      else {
+        const dot = path.lastIndexOf(".");
+        path = dot >= 0 ? path.slice(0, dot) : "";
+      }
+    }
+    return null;
+  }
+
+  private makeMouseEvent(node: ViewNode, screen: Point, pressed: boolean): MouseEvent {
+    const world = this.renderer!.toWorld(screen);
+    const local = toLayer(node, { x: world.x - node.frame.x, y: world.y - node.frame.y });
+    return { x: local.x, y: local.y, pressed };
+  }
+
+  /** Handles primary pointer down in Play mode; returns whether a layer captured the drag. */
+  pointerDownAt(screen: Point): boolean {
+    if (!this.renderer || this.store.get().tool !== "play") return false;
+    const hit = this.renderer.hitTest(screen);
+    const capture = captureTarget(hit);
+    this.capturedKey = capture?.key ?? null;
+    const target = mouseTarget(hit, "onMouseDown");
+    if (target) {
+      const ev = this.makeMouseEvent(target.node, screen, true);
+      this.host.dispatch(target.node.frame.name, () => target.handler(ev));
+    }
+    return this.capturedKey !== null;
+  }
+
+  pointerMoveAt(screen: Point, pressed: boolean) {
+    if (!this.renderer) return;
+    if (this.store.get().tool !== "play") {
+      if (!pressed) this.hover(this.renderer.hitTest(screen)?.key ?? null);
       return;
     }
-    this.hover(node?.key ?? null);
+    if (pressed && this.capturedKey !== null) {
+      const base = this.resolveCaptured(this.capturedKey);
+      const target = mouseTarget(base, "onMouseMove");
+      if (target) {
+        const ev = this.makeMouseEvent(target.node, screen, true);
+        this.host.dispatch(target.node.frame.name, () => target.handler(ev));
+      }
+      return;
+    }
+    const hit = this.renderer.hitTest(screen);
+    // Play mode shows the design as a user would see it: no outlines, a hand over clickable/pressable layers.
+    const clickable = isClickable(hit);
+    if (clickable !== this.store.get().clickable) this.store.set({ clickable });
+    const target = mouseTarget(hit, "onMouseMove");
+    if (target) {
+      const ev = this.makeMouseEvent(target.node, screen, false);
+      this.host.dispatch(target.node.frame.name, () => target.handler(ev));
+    }
+  }
+
+  pointerUpAt(screen: Point, opts: { dragged: boolean; canceled: boolean }) {
+    const key = this.capturedKey;
+    this.capturedKey = null;
+    if (!this.renderer || this.store.get().tool !== "play") return;
+    if (!opts.canceled) {
+      const base = key !== null ? this.resolveCaptured(key) : null;
+      const hit = this.renderer.hitTest(screen);
+      const upTarget = mouseTarget(base, "onMouseUp") ?? mouseTarget(hit, "onMouseUp");
+      if (upTarget) {
+        const ev = this.makeMouseEvent(upTarget.node, screen, false);
+        this.host.dispatch(upTarget.node.frame.name, () => upTarget.handler(ev));
+      }
+      if (!opts.dragged) {
+        const clickTarget = mouseTarget(hit, "onClick");
+        if (clickTarget) {
+          const ev = this.makeMouseEvent(clickTarget.node, screen, false);
+          this.host.dispatch(clickTarget.node.frame.name, () => clickTarget.handler(ev), true);
+        }
+      }
+      const clickable = isClickable(hit);
+      if (clickable !== this.store.get().clickable) this.store.set({ clickable });
+    }
   }
 
   clickAt(screen: Point) {
@@ -293,6 +375,7 @@ export class Viewer {
   }
 
   setTool(tool: Tool) {
+    this.capturedKey = null;
     this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false, measuring: false });
     if (tool === "play") this.hover(null);
   }
@@ -313,9 +396,13 @@ export class Viewer {
 
   /** Runs the onClick of the innermost clickable layer at a screen point. */
   private play(screen: Point) {
-    const node = this.renderer?.hitTest(screen) ?? null;
-    const handler = clickHandler(node);
-    if (node && handler) this.host.click(node.frame.name, handler);
+    if (!this.renderer) return;
+    const hit = this.renderer.hitTest(screen);
+    const target = mouseTarget(hit, "onClick");
+    if (target) {
+      const ev = this.makeMouseEvent(target.node, screen, false);
+      this.host.dispatch(target.node.frame.name, () => target.handler(ev), true);
+    }
   }
 
   /** Switches one of an artboard's variants; the artboard re-renders through React. */
@@ -330,6 +417,7 @@ export class Viewer {
 
   /** Puts an artboard back in its initial state, scrolled to the start. */
   resetFrame(frame: string) {
+    this.capturedKey = null;
     for (const key of this.scrolls.keys()) if (key.startsWith(`${frame}/`)) this.scrolls.delete(key);
     void this.host.reset(frame);
   }

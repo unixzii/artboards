@@ -5,6 +5,7 @@ import { createElement, type ComponentType } from "react";
 import type { Diagnostic } from "../diagnostics.ts";
 import type { SceneNode } from "../scene.ts";
 import { createSceneRoot } from "./reconciler.ts";
+export { flushSceneSync } from "./reconciler.ts";
 import { DslError } from "./schema.ts";
 import { VariantContext, VariantStore, type VariantInfo } from "./variants.ts";
 

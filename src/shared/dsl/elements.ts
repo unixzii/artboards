@@ -45,4 +45,4 @@ export function defineFont(name: unknown, faces: unknown): string {
   return name;
 }
 
-export type { Padding, Shadow, ViewBox } from "../scene.ts";
+export type { MouseEvent, Padding, Shadow, ViewBox } from "../scene.ts";
