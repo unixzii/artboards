@@ -111,7 +111,13 @@ export class Viewer {
     this.backend = backend;
     this.createStage = createStage;
     this.store.set({ mode: backend.mode });
-    this.host = new DesignHost(engine, () => this.syncScene());
+    this.host = new DesignHost(
+      engine,
+      () => this.syncScene(),
+      () => {
+        if (this.store.get().ready) this.store.set({ diagnostics: this.mergedDiagnostics() });
+      },
+    );
   }
 
   /** Binds to the stage elements and starts receiving builds. Returns the teardown. */

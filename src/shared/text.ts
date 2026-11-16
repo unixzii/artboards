@@ -1,6 +1,7 @@
 // Paragraph building and measurement. Platform-free: runs in Node and the browser.
 
 import type { CanvasKit, FontWeight, Paragraph, TypefaceFontProvider } from "canvaskit-wasm";
+import { parseColor } from "./color.ts";
 import { textRunsOf, type PaintableNode } from "./scene.ts";
 
 /** Family used as fallback when no font family resolved. */
@@ -91,7 +92,12 @@ export function textQueriesOf(node: PaintableNode): { text: string; query: FontQ
 /** The largest font size in a Text node. */
 export function textSizeOf(node: PaintableNode): number {
   const base = node.props.fontSize ?? 14;
-  return Math.max(base, ...textRunsOf(node).map((run) => run.props.fontSize ?? base));
+  let max = base;
+  for (const run of textRunsOf(node)) {
+    const s = run.props.fontSize ?? base;
+    if (s > max) max = s;
+  }
+  return max;
 }
 
 /** Builds (once) the paragraph for a Text node. Call `releaseParagraphs` when done. */
@@ -121,7 +127,7 @@ export function paragraphFor(engine: TextEngine, node: PaintableNode): Paragraph
   const leading = (size: number) => (p.lineHeight ? { heightMultiplier: p.lineHeight / size } : {});
   const textStyle = (s: RunStyle, families: string[] | undefined) => {
     const size = s.fontSize ?? 14;
-    const color = ck.parseColorString(s.color ?? "#000000");
+    const color = parseColor(ck, s.color ?? "#000000");
     const decoration =
       s.textDecoration === "underline" ? ck.UnderlineDecoration : s.textDecoration === "line-through" ? ck.LineThroughDecoration : ck.NoDecoration;
     // Variable fonts take the exact weight on their `wght` axis and the size on
@@ -186,14 +192,41 @@ export interface Constraint {
   height: number | null | undefined;
 }
 
+interface ParagraphCache {
+  minW?: number;
+  maxW?: number;
+  laidOutWidth: number;
+  height: number;
+  greekWidth?: number;
+  greekRects?: Float32Array[];
+}
+
+const paragraphCaches = new WeakMap<Paragraph, ParagraphCache>();
+
+function cacheFor(para: Paragraph): ParagraphCache {
+  let c = paragraphCaches.get(para);
+  if (!c) {
+    c = { laidOutWidth: NaN, height: 0 };
+    paragraphCaches.set(para, c);
+  }
+  return c;
+}
+
 /**
  * Lays a paragraph out to fill a box `width` wide. Boxes are as wide as the
  * text's exact advance, and floating-point error could then push the last word
  * onto a new line, so lines get a hair of slack. Left-aligned text is drawn
  * from the box's edge as before; centred text moves by half the slack.
  */
-export function layoutParagraph(para: Paragraph, width: number) {
-  para.layout(width + LINE_SLACK);
+export function layoutParagraph(para: Paragraph, width: number): number {
+  const target = width + LINE_SLACK;
+  const c = cacheFor(para);
+  if (Number.isNaN(c.laidOutWidth) || Math.abs(c.laidOutWidth - target) > 1e-5) {
+    para.layout(target);
+    c.laidOutWidth = target;
+    c.height = para.getHeight();
+  }
+  return c.height;
 }
 
 const LINE_SLACK = 0.01;
@@ -209,23 +242,41 @@ export function measureText(
   available: { width: number | "min-content" | "max-content" },
 ) {
   const para = paragraphFor(engine, node);
+  const c = cacheFor(para);
   let width = known.width;
   if (width == null) {
-    para.layout(1e7);
-    const max = para.getMaxIntrinsicWidth();
-    if (available.width === "min-content") width = para.getMinIntrinsicWidth();
-    else if (available.width === "max-content") width = max;
-    else width = Math.min(max, available.width);
+    if (c.minW === undefined || c.maxW === undefined) {
+      para.layout(1e7);
+      c.minW = para.getMinIntrinsicWidth();
+      c.maxW = para.getMaxIntrinsicWidth();
+      c.laidOutWidth = 1e7;
+      c.height = para.getHeight();
+    }
+    if (available.width === "min-content") width = c.minW;
+    else if (available.width === "max-content") width = c.maxW;
+    else width = Math.min(c.maxW, available.width);
   }
-  layoutParagraph(para, width);
-  return { width, height: known.height ?? para.getHeight() };
+  return { width, height: known.height ?? layoutParagraph(para, width) };
 }
 
 /** Height the text needs at the node's final width (may exceed a fixed height). */
 export function naturalTextHeight(engine: TextEngine, node: PaintableNode): number {
   const para = paragraphFor(engine, node);
-  layoutParagraph(para, node.layout.width);
-  return para.getHeight();
+  return layoutParagraph(para, node.layout.width);
+}
+
+/** Cached greeked line rectangles for a laid-out paragraph at `width`. */
+export function greekRectsFor(ck: CanvasKit, node: PaintableNode, para: Paragraph, width: number): Float32Array[] {
+  layoutParagraph(para, width);
+  const c = cacheFor(para);
+  if (c.greekRects && c.greekWidth !== undefined && Math.abs(c.greekWidth - width) <= 1e-5) {
+    return c.greekRects;
+  }
+  const size = textSizeOf(node);
+  const rects = para.getLineMetrics().map((line) => ck.LTRBRect(line.left, line.baseline - size / 2, line.left + line.width, line.baseline));
+  c.greekWidth = width;
+  c.greekRects = rects;
+  return rects;
 }
 
 export function releaseParagraphs(root: PaintableNode) {

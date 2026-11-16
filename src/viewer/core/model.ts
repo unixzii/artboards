@@ -39,6 +39,8 @@ export interface ViewFrame {
   modified: boolean;
   /** Null when the artboard failed to build. */
   root: ViewNode | null;
+  /** Source tree identity from DesignHost, used to preserve unchanged caches across updates. */
+  source: SceneNode | null;
   /** Position and size on the canvas. */
   x: number;
   y: number;
@@ -224,7 +226,18 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
       y += rowHeight + GAP + 40;
       rowHeight = 0;
     }
-    const frame: ViewFrame = { name: input.name, error: input.error, variants: input.variants.list(), modified: input.modified, root: null, x, y, w, h };
+    const frame: ViewFrame = {
+      name: input.name,
+      error: input.error,
+      variants: input.variants.list(),
+      modified: input.modified,
+      root: null,
+      source: input.root,
+      x,
+      y,
+      w,
+      h,
+    };
     if (input.root) frame.root = hydrate(input.root, frame, "", null, nodes, scrolls);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);

@@ -1,6 +1,7 @@
 // Scene tree -> Skia canvas. Platform-free: used by both Node export and browser viewer.
 
 import type { Canvas, CanvasKit, ImageFilter, Paint, Paragraph, Path } from "canvaskit-wasm";
+import { parseColor } from "./color.ts";
 import type { RenderEngine } from "./engine.ts";
 import {
   expandCorners,
@@ -14,7 +15,7 @@ import {
   type Shadow,
   type Sides,
 } from "./scene.ts";
-import { layoutParagraph, paragraphFor, textSizeOf } from "./text.ts";
+import { greekRectsFor, layoutParagraph, paragraphFor, textSizeOf } from "./text.ts";
 
 const DEFAULT_SHADOW_COLOR = "rgba(0, 0, 0, 0.25)";
 const PLACEHOLDER_FILL = "#e5e7eb";
@@ -22,6 +23,60 @@ const PLACEHOLDER_LINE = "#9ca3af";
 
 /** How much of a line of text is ink, roughly: the opacity of the bar that stands in for it. */
 const GREEK_OPACITY = 0.4;
+
+const paintPool = new WeakMap<CanvasKit, { paint: Paint; busy: boolean }>();
+
+function borrowPaint(ck: CanvasKit, fn: (paint: Paint) => void) {
+  let entry = paintPool.get(ck);
+  if (!entry) {
+    entry = { paint: new ck.Paint(), busy: false };
+    paintPool.set(ck, entry);
+  }
+  if (!entry.busy) {
+    entry.busy = true;
+    const p = entry.paint;
+    p.setAntiAlias(true);
+    p.setStyle(ck.PaintStyle.Fill);
+    p.setStrokeWidth(0);
+    p.setStrokeCap(ck.StrokeCap.Butt);
+    p.setStrokeJoin(ck.StrokeJoin.Miter);
+    p.setAlphaf(1);
+    try {
+      fn(p);
+    } finally {
+      p.setShader(null);
+      p.setMaskFilter(null);
+      p.setPathEffect(null);
+      entry.busy = false;
+    }
+    return;
+  }
+  const temp = new ck.Paint();
+  temp.setAntiAlias(true);
+  try {
+    fn(temp);
+  } finally {
+    temp.delete();
+  }
+}
+
+const svgPathCache = new WeakMap<CanvasKit, Map<string, Path | null>>();
+
+function getRawSvgPath(ck: CanvasKit, d: string): Path | null {
+  let map = svgPathCache.get(ck);
+  if (!map) {
+    map = new Map();
+    svgPathCache.set(ck, map);
+  }
+  if (map.has(d)) return map.get(d)!;
+  if (map.size >= 1024) {
+    for (const cached of map.values()) cached?.delete();
+    map.clear();
+  }
+  const parsed = ck.Path.MakeFromSVGString(d);
+  map.set(d, parsed);
+  return parsed;
+}
 
 /**
  * Paints a node and everything in it. Text whose font size is below
@@ -43,7 +98,8 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   // Frosted glass samples the backdrop before the layer's own paint is isolated.
   const group = isComponentNode(node) || node.type === MASK_TYPE;
   const isPath = node.type === "Path";
-  const path = isPath ? buildRenderPath(ck, node) : null;
+  const renderedPath = isPath ? buildRenderPath(ck, node) : null;
+  const path = renderedPath?.path ?? null;
   const box = group || node.type === "Text" || isPath ? null : boxGeometry(node);
   if (p.backdropBlur > 0 && w > 0 && h > 0) {
     if (box) backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipRRect(box.rrect(ck, ZERO), op, true));
@@ -69,8 +125,7 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
     for (const child of node.children) paintNode(engine, canvas, child, greekBelow);
   } else if (node.type === "Text" && textSizeOf(node) < greekBelow) {
     const para = paragraphFor(engine, node);
-    layoutParagraph(para, w);
-    greekText(ck, canvas, node, para);
+    greekText(ck, canvas, node, para, w);
   } else if (node.type === "Text") {
     const para = paragraphFor(engine, node);
     layoutParagraph(para, w);
@@ -78,8 +133,8 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
     const draw = () => canvas.drawParagraph(para, 0, 0);
     if (shadows.length > 0 && w > 0 && h > 0) drawFilteredShadows(ck, canvas, shadows, draw);
     draw();
-  } else if (path) {
-    paintPathNode(ck, canvas, node, path);
+  } else if (renderedPath) {
+    paintPathNode(ck, canvas, node, renderedPath);
   } else if (box) {
     paintBox(engine, canvas, node, box, greekBelow);
   }
@@ -183,16 +238,15 @@ function paintBox(engine: RenderEngine, canvas: Canvas, node: PaintableNode, box
 }
 
 /** A bar per line where the lowercase letters would sit, in the text's color. */
-function greekText(ck: CanvasKit, canvas: Canvas, node: PaintableNode, para: Paragraph) {
-  const size = textSizeOf(node);
-  const color = ck.parseColorString(node.props.color ?? "#000000");
-  color[3] *= GREEK_OPACITY;
-  const paint = new ck.Paint();
-  paint.setColor(color);
-  for (const line of para.getLineMetrics()) {
-    canvas.drawRect(ck.LTRBRect(line.left, line.baseline - size / 2, line.left + line.width, line.baseline), paint);
-  }
-  paint.delete();
+function greekText(ck: CanvasKit, canvas: Canvas, node: PaintableNode, para: Paragraph, w: number) {
+  const rects = greekRectsFor(ck, node, para, w);
+  if (rects.length === 0) return;
+  const base = parseColor(ck, node.props.color ?? "#000000");
+  const color = Float32Array.of(base[0], base[1], base[2], base[3] * GREEK_OPACITY);
+  borrowPaint(ck, (paint) => {
+    paint.setColor(color);
+    for (const r of rects) canvas.drawRect(r, paint);
+  });
 }
 
 function drawBoxStroke(ck: CanvasKit, canvas: Canvas, node: PaintableNode, box: BoxGeometry) {
@@ -319,7 +373,7 @@ function drawPathInsetShadows(ck: CanvasKit, canvas: Canvas, path: Path, shadows
     canvas.saveLayer(blurred, bounds);
     canvas.translate(s.x, s.y);
     canvas.clipPath(path, ck.ClipOp.Difference, true);
-    canvas.drawColor(ck.parseColorString(s.color));
+    canvas.drawColor(parseColor(ck, s.color));
     canvas.restore();
     // Keep it only inside the path. (A DstIn draw would only touch pixels the path covers.)
     canvas.save();
@@ -336,7 +390,13 @@ function drawPathInsetShadows(ck: CanvasKit, canvas: Canvas, path: Path, shadows
 
 // ------------------------------------------------------------------ paths
 
-function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode, path: Path) {
+interface RenderedPath {
+  path: Path;
+  owned: boolean;
+}
+
+function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode, rendered: RenderedPath) {
+  const { path, owned } = rendered;
   const { width: w, height: h } = node.layout;
   const p = node.props;
   try {
@@ -356,14 +416,16 @@ function paintPathNode(ck: CanvasKit, canvas: Canvas, node: PaintableNode, path:
       if (inset.length > 0 && p.fill) drawPathInsetShadows(ck, canvas, path, inset);
     });
   } finally {
-    path.delete();
+    if (owned) path.delete();
   }
 }
 
-function buildRenderPath(ck: CanvasKit, node: PaintableNode): Path | null {
+function buildRenderPath(ck: CanvasKit, node: PaintableNode): RenderedPath | null {
   const p = node.props;
-  if (typeof p.d !== "string" || !p.d.trim()) return null;
-  const raw = ck.Path.MakeFromSVGString(p.d);
+  if (typeof p.d !== "string") return null;
+  const d = p.d.trim();
+  if (!d) return null;
+  const raw = getRawSvgPath(ck, d);
   if (!raw) return null;
 
   const fillType = p.fillRule === "evenodd" ? ck.FillType.EvenOdd : ck.FillType.Winding;
@@ -371,7 +433,7 @@ function buildRenderPath(ck: CanvasKit, node: PaintableNode): Path | null {
   const { width: w, height: h } = node.layout;
 
   if (!vb && fillType === ck.FillType.Winding) {
-    return raw;
+    return { path: raw, owned: false };
   }
 
   const pb = new ck.PathBuilder();
@@ -380,7 +442,6 @@ function buildRenderPath(ck: CanvasKit, node: PaintableNode): Path | null {
     const [vbX, vbY, vbW, vbH] = vb;
     if (w <= 0 || h <= 0) {
       pb.delete();
-      raw.delete();
       return null;
     }
     const matrix = ck.Matrix.multiply(ck.Matrix.scaled(w / vbW, h / vbH), ck.Matrix.translated(-vbX, -vbY));
@@ -388,8 +449,7 @@ function buildRenderPath(ck: CanvasKit, node: PaintableNode): Path | null {
   } else {
     pb.addPath(raw);
   }
-  raw.delete();
-  return pb.detachAndDelete();
+  return { path: pb.detachAndDelete(), owned: true };
 }
 
 /** `betweenFillAndStroke` paints inner shadows, which go over the fill and under the stroke. */
@@ -452,7 +512,7 @@ function drawFilteredShadows(ck: CanvasKit, canvas: Canvas, shadows: Required<Sh
     let morphology: ImageFilter | null = null;
     if (s.spread > 0) morphology = ck.ImageFilter.MakeDilate(s.spread, s.spread, null);
     else if (s.spread < 0) morphology = ck.ImageFilter.MakeErode(-s.spread, -s.spread, null);
-    const drop = ck.ImageFilter.MakeDropShadowOnly(s.x, s.y, sigma, sigma, ck.parseColorString(s.color), morphology);
+    const drop = ck.ImageFilter.MakeDropShadowOnly(s.x, s.y, sigma, sigma, parseColor(ck, s.color), morphology);
     const layerPaint = new ck.Paint();
     layerPaint.setImageFilter(drop);
     canvas.saveLayer(layerPaint);
@@ -479,35 +539,34 @@ export function gradientStops(stops: (string | GradientStop)[]): { colors: strin
 
 /** Runs `fn` with a paint for a color or a gradient laid over a w x h box. */
 function withPaint(ck: CanvasKit, fill: Fill, w: number, h: number, fn: (paint: Paint) => void) {
-  const paint = new ck.Paint();
-  paint.setAntiAlias(true);
-  if (typeof fill === "string") {
-    paint.setColor(ck.parseColorString(fill));
-  } else {
-    const { colors, positions } = gradientStops(fill.stops);
-    const parsed = colors.map((c) => ck.parseColorString(c));
-    let shader;
-    if (fill.type === "radial") {
-      const [cx, cy] = fill.center ?? [0.5, 0.5];
-      // Built in a unit box and stretched over the real one, so it is an ellipse in non-square boxes.
-      shader = ck.Shader.MakeRadialGradient([cx, cy], fill.radius ?? 0.5, parsed, positions, ck.TileMode.Clamp, ck.Matrix.scaled(w || 1, h || 1));
+  borrowPaint(ck, (paint) => {
+    if (typeof fill === "string") {
+      paint.setColor(parseColor(ck, fill));
     } else {
-      const rad = ((fill.angle ?? 180) * Math.PI) / 180;
-      const dx = Math.sin(rad);
-      const dy = -Math.cos(rad);
-      // CSS gradient line: long enough that the corners get the first and last stops.
-      const half = (Math.abs(w * dx) + Math.abs(h * dy)) / 2;
-      shader = ck.Shader.MakeLinearGradient(
-        [w / 2 - dx * half, h / 2 - dy * half],
-        [w / 2 + dx * half, h / 2 + dy * half],
-        parsed,
-        positions,
-        ck.TileMode.Clamp,
-      );
+      const { colors, positions } = gradientStops(fill.stops);
+      const parsed = colors.map((c) => parseColor(ck, c));
+      let shader;
+      if (fill.type === "radial") {
+        const [cx, cy] = fill.center ?? [0.5, 0.5];
+        // Built in a unit box and stretched over the real one, so it is an ellipse in non-square boxes.
+        shader = ck.Shader.MakeRadialGradient([cx, cy], fill.radius ?? 0.5, parsed, positions, ck.TileMode.Clamp, ck.Matrix.scaled(w || 1, h || 1));
+      } else {
+        const rad = ((fill.angle ?? 180) * Math.PI) / 180;
+        const dx = Math.sin(rad);
+        const dy = -Math.cos(rad);
+        // CSS gradient line: long enough that the corners get the first and last stops.
+        const half = (Math.abs(w * dx) + Math.abs(h * dy)) / 2;
+        shader = ck.Shader.MakeLinearGradient(
+          [w / 2 - dx * half, h / 2 - dy * half],
+          [w / 2 + dx * half, h / 2 + dy * half],
+          parsed,
+          positions,
+          ck.TileMode.Clamp,
+        );
+      }
+      paint.setShader(shader);
+      shader.delete();
     }
-    paint.setShader(shader);
-    shader.delete();
-  }
-  fn(paint);
-  paint.delete();
+    fn(paint);
+  });
 }

@@ -198,14 +198,65 @@ export function initTaffy(wasm: ArrayBufferView | ArrayBuffer | string): Promise
 
 const isAbsolute = (n: SceneNode) => n.props.absolute === true || (n.parent != null && n.parent.type !== "#root" && kindOf(n.parent) === "free");
 
+/** Lays out an artboard whose fonts and images have already been prepared via `prepareTree`. */
+export function layoutPreparedTree(root: SceneNode, engine: RenderEngine) {
+  if (!taffyReady) throw new Error("Taffy is not initialized; call initTaffy first.");
+  layoutSubtree(root, engine, new Map());
+}
+
 /** Lays out one artboard (a single root node) and writes `layout` on every node. */
 export async function layoutTree(root: SceneNode, engine: RenderEngine) {
   if (!taffyReady) throw new Error("Taffy is not initialized; call initTaffy first.");
   await Promise.all([taffyReady, prepareTree(root, engine)]);
-  layoutSubtree(root, engine, new Map());
+  layoutPreparedTree(root, engine);
+}
+
+function clampAxis(v: number, min: unknown, max: unknown): number {
+  let out = v;
+  if (typeof max === "number") out = Math.min(out, max);
+  if (typeof min === "number") out = Math.max(out, min);
+  return out;
+}
+
+function knownAxisSize(node: SceneNode, axis: "width" | "height", sized: Stretched): number | undefined {
+  const s = sized.get(node)?.[axis];
+  const raw = s != null ? s : typeof node.props[axis] === "number" ? (node.props[axis] as number) : undefined;
+  if (raw == null) return undefined;
+  return axis === "width" ? clampAxis(raw, node.props.minWidth, node.props.maxWidth) : clampAxis(raw, node.props.minHeight, node.props.maxHeight);
+}
+
+/**
+ * Pre-seeds absolute children whose parent size is already statically known
+ * (e.g. a `<Column width="fill" height="fill" />` inside a fixed `<Frame>`),
+ * avoiding a wasted un-constrained pass 0 over the whole subtree.
+ */
+function seedAbsoluteSizes(root: SceneNode, sized: Stretched) {
+  walk(root, (n) => {
+    if (n === root || !n.parent || !isAbsolute(n)) return;
+    const p = n.props;
+    const span = (axis: "width" | "height", start: unknown, end: unknown) => {
+      const v = p[axis];
+      if (v === "fill" || (start != null && end != null && typeof v !== "number")) {
+        const parentSize = knownAxisSize(n.parent!, axis, sized);
+        if (parentSize != null) return Math.max(0, parentSize - ((start as number) ?? 0) - ((end as number) ?? 0));
+      }
+      return undefined;
+    };
+    const nextW = span("width", p.x, p.right);
+    const nextH = span("height", p.y, p.bottom);
+    if (nextW != null || nextH != null) {
+      const prev = sized.get(n);
+      sized.set(n, {
+        ...prev,
+        ...(nextW != null ? { width: nextW } : {}),
+        ...(nextH != null ? { height: nextH } : {}),
+      });
+    }
+  });
 }
 
 function layoutSubtree(root: SceneNode, engine: RenderEngine, sized: Stretched) {
+  seedAbsoluteSizes(root, sized);
   // Taffy resolves percentages and right/bottom insets of absolute children
   // against the wrong box, so sizes that depend on the parent are computed
   // here from the previous pass. Each pass settles one more level of nesting.
@@ -237,11 +288,14 @@ function absoluteSizes(root: SceneNode, sized: Stretched): boolean {
       }
       return undefined;
     };
-    const next = { width: span("width", p.x, p.right), height: span("height", p.y, p.bottom) };
-    if (next.width == null && next.height == null) return;
+    const nextW = span("width", p.x, p.right);
+    const nextH = span("height", p.y, p.bottom);
+    if (nextW == null && nextH == null) return;
     const prev = sized.get(n);
-    if (prev?.width !== next.width || prev?.height !== next.height) {
-      sized.set(n, next);
+    const width = nextW ?? prev?.width;
+    const height = nextH ?? prev?.height;
+    if (prev?.width !== width || prev?.height !== height) {
+      sized.set(n, { ...(width !== undefined ? { width } : {}), ...(height !== undefined ? { height } : {}) });
       changed = true;
     }
   });
@@ -267,14 +321,17 @@ function computeLayout(root: SceneNode, engine: RenderEngine, stretched: Stretch
   const ids = new Map<SceneNode, bigint>();
 
   const build = (node: SceneNode, parent: ParentKind): bigint => {
-    const style = styleFor(node, parent, stretched.get(node));
+    const st = stretched.get(node);
+    const style = styleFor(node, parent, st);
     let id: bigint;
     if (LEAVES.has(node.type)) {
-      id = tree.newLeafWithContext(style, node);
+      const fixedW = st?.width != null || typeof node.props.width === "number";
+      const fixedH = st?.height != null || typeof node.props.height === "number";
+      id = node.type !== "Text" && fixedW && fixedH ? tree.newLeaf(style) : tree.newLeafWithContext(style, node);
     } else {
       const kind = kindOf(node);
       const kids = layerChildren(node).map((c) => build(c, kind));
-      id = tree.newWithChildren(style, kids);
+      id = kids.length > 0 ? tree.newWithChildren(style, kids) : tree.newLeaf(style);
     }
     style.free();
     ids.set(node, id);

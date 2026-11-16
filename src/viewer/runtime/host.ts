@@ -19,10 +19,10 @@ import {
 } from "../../shared/dsl/frame.ts";
 import { groupComponents } from "../../shared/dsl/reconciler.ts";
 import { VariantStore, type VariantValue } from "../../shared/dsl/variants.ts";
-import type { RenderEngine } from "../../shared/engine.ts";
+import { prepareTree, type RenderEngine } from "../../shared/engine.ts";
 import { resetCustomFonts } from "../../shared/fonts.ts";
 import { checkFrame } from "../../shared/layout-lint.ts";
-import { layoutTree } from "../../shared/layout.ts";
+import { layoutPreparedTree, layoutTree } from "../../shared/layout.ts";
 import type { SceneNode } from "../../shared/scene.ts";
 import { releaseParagraphs } from "../../shared/text.ts";
 
@@ -70,16 +70,20 @@ export class DesignHost {
 
   private engine: RenderEngine;
   private onChange: () => void;
+  private onDiagnostics: () => void;
   private managed: ManagedArtboard[] = [];
   private moduleDiagnostics: Diagnostic[] = [];
   private mapSource: SourceMapper | undefined;
   private queue: Promise<void> = Promise.resolve();
+  private loadSeq = 0;
+  private lintTimer: ReturnType<typeof setTimeout> | undefined;
   /** Variant values picked per artboard, carried into the next bundle. */
   private remembered = new Map<string, [string, VariantValue][]>();
 
-  constructor(engine: RenderEngine, onChange: () => void) {
+  constructor(engine: RenderEngine, onChange: () => void, onDiagnostics: () => void = onChange) {
     this.engine = engine;
     this.onChange = onChange;
+    this.onDiagnostics = onDiagnostics;
   }
 
   dispose() {
@@ -87,6 +91,9 @@ export class DesignHost {
   }
 
   clear() {
+    this.loadSeq++;
+    clearTimeout(this.lintTimer);
+    this.lintTimer = undefined;
     this.remember();
     for (const f of this.managed) this.teardown(f);
     this.managed = [];
@@ -138,6 +145,7 @@ export class DesignHost {
   loadBundle(version: number, file: string): Promise<void> {
     return this.enqueue(async () => {
       this.clear();
+      const seq = ++this.loadSeq;
       resetCustomFonts();
       (globalThis as any)[BUNDLE_META_GLOBAL] = undefined;
 
@@ -162,14 +170,79 @@ export class DesignHost {
         this.moduleDiagnostics = [{ severity: "error", rule: "dsl", message: "No exported components. Export each artboard.", source: file }];
       }
 
+      const reconciled: { item: ManagedArtboard; host: SceneNode }[] = [];
       for (const entry of entries) {
         const item = managed(entry, new VariantStore([], this.remembered.get(entry.name)));
         this.managed.push(item);
-        await this.mount(item);
+        try {
+          const mounted = reconcileFrame(item.entry, {
+            variants: item.variants,
+            onCommit: () => this.scheduleRelayout(item),
+            onError: (err) => this.handleAsyncError(item, err),
+          });
+          item.container = mounted.container;
+          item.unmount = mounted.unmount;
+          reconciled.push({ item, host: mounted.host });
+        } catch (e) {
+          this.teardown(item);
+          item.error = this.toDiagnostic(e, item.name);
+        }
       }
+
+      await Promise.all(
+        reconciled.map(({ item, host }) =>
+          prepareTree(host, this.engine).catch((e) => {
+            this.teardown(item);
+            item.error = this.toDiagnostic(e, item.name);
+          }),
+        ),
+      );
+      if (this.loadSeq !== seq) return;
+
+      for (const { item, host } of reconciled) {
+        if (item.disposed || item.error) continue;
+        try {
+          layoutPreparedTree(host, this.engine);
+          item.root = groupComponents(host);
+        } catch (e) {
+          this.teardown(item);
+          item.error = this.toDiagnostic(e, item.name);
+        }
+      }
+
       this.syncDiagnostics();
       this.onChange();
+      if (this.managed.length > 0) this.runDeferredLint(seq);
     });
+  }
+
+  private runDeferredLint(seq: number) {
+    let idx = 0;
+    let changed = false;
+    const step = () => {
+      if (this.loadSeq !== seq) return;
+      const deadline = performance.now() + 8;
+      while (idx < this.managed.length) {
+        const item = this.managed[idx++];
+        if (item.disposed || !item.root || item.error) continue;
+        const warnings = checkFrame({ name: item.name, root: item.root, engine: this.engine });
+        if (warnings.length > 0) {
+          item.warnings = warnings;
+          changed = true;
+        }
+        if (performance.now() >= deadline) break;
+      }
+      if (idx < this.managed.length) {
+        this.lintTimer = setTimeout(step, 0);
+      } else {
+        this.lintTimer = undefined;
+        if (changed) {
+          this.syncDiagnostics();
+          this.onDiagnostics();
+        }
+      }
+    };
+    this.lintTimer = setTimeout(step, 0);
   }
 
   private async mount(item: ManagedArtboard) {

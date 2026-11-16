@@ -1,10 +1,13 @@
 // Layout and legibility rules checked against a laid-out artboard.
 
+import { parseColor } from "./color.ts";
 import type { Diagnostic } from "./diagnostics.ts";
 import type { RenderEngine } from "./engine.ts";
 import { gradientStops } from "./paint.ts";
 import { MASK_TYPE, expandSides, isComponentNode, nodePath, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "./scene.ts";
 import { naturalTextHeight } from "./text.ts";
+
+const validPaths = new Set<string>();
 
 const label = (n: SceneNode) => `<${n.type}${n.props.name ? ` "${n.props.name}"` : ""}>`;
 
@@ -109,14 +112,20 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
 
     if (n.type === "Path") {
       const d = typeof n.props.d === "string" ? n.props.d.trim() : "";
-      const parsed = d ? ck.Path.MakeFromSVGString(d) : null;
-      if (!parsed) {
-        warn(n, "invalid-path", `${label(n)} has an invalid or empty SVG path \`d\`.`);
-      } else {
-        parsed.delete();
-        if (!n.props.fill && !n.props.stroke && !(n.props.backdropBlur > 0)) {
-          warn(n, "unpainted-path", `${label(n)} has neither \`fill\` nor \`stroke\` and will not be visible.`);
+      let ok = d.length > 0 && validPaths.has(d);
+      if (!ok && d) {
+        const parsed = ck.Path.MakeFromSVGString(d);
+        if (parsed) {
+          parsed.delete();
+          if (validPaths.size > 2048) validPaths.clear();
+          validPaths.add(d);
+          ok = true;
         }
+      }
+      if (!ok) {
+        warn(n, "invalid-path", `${label(n)} has an invalid or empty SVG path \`d\`.`);
+      } else if (!n.props.fill && !n.props.stroke && !(n.props.backdropBlur > 0)) {
+        warn(n, "unpainted-path", `${label(n)} has neither \`fill\` nor \`stroke\` and will not be visible.`);
       }
     }
 
@@ -144,13 +153,13 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
         break;
       }
     }
-    const backgrounds = (typeof bgFill === "string" ? [bgFill] : gradientStops(bgFill.stops).colors).map((c) => ck.parseColorString(c));
+    const backgrounds = (typeof bgFill === "string" ? [bgFill] : gradientStops(bgFill.stops).colors).map((c) => parseColor(ck, c));
     if (backgrounds.some((b) => b[3] !== 1)) return;
     let worst: { ratio: number; need: number } | undefined;
     for (const run of textRunsOf(n)) {
       if (!run.text.trim()) continue;
       const style = { ...n.props, ...run.props };
-      const fg = ck.parseColorString(style.color ?? "#000000");
+      const fg = parseColor(ck, style.color ?? "#000000");
       if (fg[3] !== 1) continue;
       const size = style.fontSize ?? 14;
       const large = size >= 24 || (size >= 18.5 && Number(style.fontWeight ?? 400) >= 700);
