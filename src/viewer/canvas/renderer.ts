@@ -90,6 +90,7 @@ export class Renderer implements StageBackend {
   private engine: RenderEngine;
   private paints: { white: Paint; select: Paint; hover: Paint; compSelect: Paint; compHover: Paint; error: Paint; measure: Paint };
   private surface: Surface | null = null;
+  private maskSample: Surface | null = null;
   private recordings = new Map<string, Recording>();
   private tiles = new Map<string, Tile>();
   private tilePixels = 0;
@@ -164,6 +165,8 @@ export class Renderer implements StageBackend {
     clearTimeout(this.repaintTimer);
     this.surface?.delete();
     this.surface = null;
+    this.maskSample?.delete();
+    this.maskSample = null;
   }
 
   // ------------------------------------------------------------------ content
@@ -247,8 +250,31 @@ export class Renderer implements StageBackend {
   }
 
   hitTest(screen: Point): ViewNode | null {
-    return hitTest(this.model, this.toWorld(screen));
+    return hitTest(this.model, this.toWorld(screen), this.maskCovers);
   }
+
+  private maskCovers = (mask: ViewNode, x: number, y: number): boolean => {
+    const ck = this.ck;
+    const sample = (this.maskSample ??= ck.MakeSurface(1, 1));
+    if (!sample) return true;
+    const scale = this.view.s * this.dpr;
+    const canvas = sample.getCanvas();
+    canvas.clear(ck.TRANSPARENT);
+    canvas.save();
+    canvas.translate(0.5, 0.5);
+    canvas.scale(scale, scale);
+    canvas.translate(-x, -y);
+    paintNode(this.engine, canvas, mask);
+    canvas.restore();
+    const pixel = canvas.readPixels(0, 0, {
+      width: 1,
+      height: 1,
+      alphaType: ck.AlphaType.Premul,
+      colorType: ck.ColorType.RGBA_8888,
+      colorSpace: ck.ColorSpace.SRGB,
+    });
+    return !pixel || pixel[3] > 0;
+  };
 
   panBy(dx: number, dy: number) {
     this.view.tx += dx;

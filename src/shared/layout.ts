@@ -202,15 +202,23 @@ const isAbsolute = (n: SceneNode) => n.props.absolute === true || (n.parent != n
 export async function layoutTree(root: SceneNode, engine: RenderEngine) {
   if (!taffyReady) throw new Error("Taffy is not initialized; call initTaffy first.");
   await Promise.all([taffyReady, prepareTree(root, engine)]);
+  layoutSubtree(root, engine, new Map());
+}
+
+function layoutSubtree(root: SceneNode, engine: RenderEngine, sized: Stretched) {
   // Taffy resolves percentages and right/bottom insets of absolute children
   // against the wrong box, so sizes that depend on the parent are computed
   // here from the previous pass. Each pass settles one more level of nesting.
-  const sized: Stretched = new Map();
   for (let pass = 0; pass < 8; pass++) {
     computeLayout(root, engine, sized);
     if (!absoluteSizes(root, sized)) break;
   }
   resolveFarInsets(root);
+  walk(root, (node) => {
+    if (!node.mask) return;
+    const { width, height } = node.layout;
+    layoutSubtree(node.mask, engine, new Map([[node.mask, { width, height }]]));
+  });
 }
 
 /**

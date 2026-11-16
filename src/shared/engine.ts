@@ -29,6 +29,6 @@ export async function prepareTree(root: PaintableNode, engine: RenderEngine): Pr
         tasks.push(engine.fonts.ensure(text, query));
       }
     }
-  });
+  }, { includeMasks: true });
   if (tasks.length) await Promise.all(tasks);
 }

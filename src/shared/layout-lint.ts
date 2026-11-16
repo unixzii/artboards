@@ -3,7 +3,7 @@
 import type { Diagnostic } from "./diagnostics.ts";
 import type { RenderEngine } from "./engine.ts";
 import { gradientStops } from "./paint.ts";
-import { expandSides, isComponentNode, nodePath, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "./scene.ts";
+import { MASK_TYPE, expandSides, isComponentNode, nodePath, sourceOf, textRunsOf, walk, type Fill, type SceneNode } from "./scene.ts";
 import { naturalTextHeight } from "./text.ts";
 
 const label = (n: SceneNode) => `<${n.type}${n.props.name ? ` "${n.props.name}"` : ""}>`;
@@ -33,7 +33,7 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
   const { ck } = engine;
 
   walk(root, (n) => {
-    if (n.type === "#text" || n.type === "Span" || isComponentNode(n)) return;
+    if (n.type === "#text" || n.type === "Span" || n.type === MASK_TYPE || isComponentNode(n)) return;
     const { width, height } = n.layout;
     let x = n.layout.x;
     let y = n.layout.y;
@@ -57,7 +57,7 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
       warn(n, "zero-size", `${label(n)} is ${width}x${height} and will not be visible — ${why}.`);
     }
 
-    if (p && p.type !== "#root" && !p.props.clip && !p.props.scroll) {
+    if (p && p.type !== "#root" && p.type !== MASK_TYPE && !p.props.clip && !p.props.scroll) {
       const b = rotatedBounds(x, y, width, height, n.props.rotation ?? 0);
       const dx = Math.max(0, -b.x, b.x + b.w - p.layout.width);
       const dy = Math.max(0, -b.y, b.y + b.h - p.layout.height);
@@ -130,13 +130,13 @@ export function checkFrame({ root, engine, name: frame }: { name: string; root: 
       }
       checkContrast(n);
     }
-  });
+  }, { includeMasks: true });
   return out;
 
   /** Contrast of every run's color against the nearest filled ancestor (white if none). */
   function checkContrast(n: SceneNode) {
     // Translucency makes the effective colors unknowable here.
-    for (let a: SceneNode | null = n; a; a = a.parent) if ((a.props.opacity ?? 1) < 1) return;
+    for (let a: SceneNode | null = n; a; a = a.parent) if (a.type === MASK_TYPE || (a.props.opacity ?? 1) < 1) return;
     let bgFill: Fill = "#ffffff";
     for (let a = n.parent; a; a = a.parent) {
       if (a.props.fill) {

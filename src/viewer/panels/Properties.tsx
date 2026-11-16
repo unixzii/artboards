@@ -6,7 +6,7 @@ import { useViewer, useViewerState } from "../core/context.ts";
 import { enclosingComponent, sizing, type ViewFrame, type ViewNode } from "../core/model.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import { gradientStops } from "../../shared/paint.ts";
-import { isAssetRef, type Gradient } from "../../shared/scene.ts";
+import { MASK_TYPE, isAssetRef, type Gradient } from "../../shared/scene.ts";
 import { LayerIcon } from "./LayerIcon.tsx";
 import { ProblemItem } from "./ProblemItem.tsx";
 
@@ -320,7 +320,7 @@ function Inspector({ node }: { node: ViewNode }) {
         <div className={`title${comp ? " comp-title" : ""}`}>
           <LayerIcon node={node} size={14} />
           <span>
-            {comp ? comp.name : node.type}
+            {comp ? comp.name : node.type === MASK_TYPE ? "Mask" : node.type}
             {!comp && node.props.name && ` “${node.props.name}”`}
           </span>
         </div>

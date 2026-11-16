@@ -191,11 +191,12 @@ svg.lucide { flex: none; display: block; }
 .empty { color: var(--muted); padding: 4px 12px 8px; }
 
 /* Figma-style Layers */
+#layers { --layer-row-height: 30px; }
 .layer {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 30px;
+  height: var(--layer-row-height);
   margin: 0 6px;
   padding: 0 8px 0 6px;
   border-radius: 6px;
@@ -203,8 +204,9 @@ svg.lucide { flex: none; display: block; }
   cursor: pointer;
   user-select: none;
 }
-.layer.artboard { font-weight: 600; margin-top: 4px; }
-.layer.artboard:first-child { margin-top: 0; }
+.layer.artboard { font-weight: 600; }
+.layer.frame-start { margin-top: 4px; }
+.layer.frame-start:first-child { margin-top: 0; }
 .layer .twisty {
   flex: none;
   width: 14px;
@@ -216,10 +218,35 @@ svg.lucide { flex: none; display: block; }
 }
 .layer .twisty:not(.empty-twisty):hover { color: var(--text); background: rgba(127, 127, 127, 0.14); }
 .layer .layer-icon { flex: none; color: var(--muted); }
+.layer-icon-slot { position: relative; display: flex; flex: none; }
+.layer-mask-link {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  height: calc(var(--layer-row-height) * var(--mask-distance) - 20px);
+  width: 1px;
+  background: currentColor;
+  color: var(--muted);
+  opacity: 0.4;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.layer-mask-link::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-top: 1px solid;
+  border-left: 1px solid;
+  transform: translateX(-50%) rotate(45deg);
+}
 .layer.artboard .layer-icon { color: var(--text); }
 .layer .type { font-weight: 450; }
 .layer.artboard .type { font-weight: 600; }
 .layer .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.layer .mask-label { margin-left: auto; flex: none; color: var(--muted); }
 
 /* Component & component-descendant tint (orthogonal to selection background) */
 .layer.in-component .layer-icon,

@@ -3,8 +3,8 @@
 import { isValidElement, type ReactNode } from "react";
 import Reconciler from "react-reconciler";
 import { DefaultEventPriority } from "react-reconciler/constants.js";
-import { COMPONENT_TYPE, createNode, layerChildren, type Box, type ComponentInfo, type SceneNode } from "../scene.ts";
-import { componentSourceOf } from "./jsx-runtime.ts";
+import { COMPONENT_TYPE, MASK_TYPE, createNode, layerChildren, type Box, type ComponentInfo, type SceneNode } from "../scene.ts";
+import { componentSourceOf, layerProps } from "./jsx-runtime.ts";
 import { DslError, validateProps } from "./schema.ts";
 import { VariantContext } from "./variants.ts";
 
@@ -103,6 +103,7 @@ function captureComponentStack(hostFiber: any): ComponentInfo[] | undefined {
 /** Drops cached Skia paragraph and runs on the enclosing <Text> when its content or style mutates. */
 function invalidateText(node: SceneNode | null) {
   for (let n = node; n; n = n.parent) {
+    if (n.type === MASK_TYPE) return;
     if (n.type === "Text") {
       n.paragraph?.delete();
       n.paragraph = undefined;
@@ -114,26 +115,28 @@ function invalidateText(node: SceneNode | null) {
   }
 }
 
-function append(parent: SceneNode, child: SceneNode) {
+function append(parent: SceneNode, child: SceneNode, before?: SceneNode) {
   detach(child);
   child.parent = parent;
-  parent.children.push(child);
-  invalidateText(parent);
-}
-
-function insertBefore(parent: SceneNode, child: SceneNode, before: SceneNode) {
-  detach(child);
-  child.parent = parent;
-  parent.children.splice(parent.children.indexOf(before), 0, child);
+  if (child.type === MASK_TYPE) {
+    parent.mask = child;
+    return;
+  }
+  if (before && before !== parent.mask) parent.children.splice(parent.children.indexOf(before), 0, child);
+  else parent.children.push(child);
   invalidateText(parent);
 }
 
 function detach(child: SceneNode) {
   const p = child.parent;
   if (!p) return;
-  invalidateText(p);
-  const i = p.children.indexOf(child);
-  if (i >= 0) p.children.splice(i, 1);
+  if (child === p.mask) {
+    p.mask = undefined;
+  } else {
+    invalidateText(p);
+    const i = p.children.indexOf(child);
+    if (i >= 0) p.children.splice(i, 1);
+  }
   child.parent = null;
 }
 
@@ -153,13 +156,15 @@ const hostConfig: any = {
   isPrimaryRenderer: true,
 
   createInstance(type: string, props: Record<string, any>, _root: SceneNode, ctx: HostContext, fiber: any) {
+    if (type === MASK_TYPE) return createNode(type, {});
     if (type === "Span" && !ctx.inText) throw new DslError("<Span> must be inside a <Text>.", props.$source);
     if (type === "Span" && ctx.inSpan) throw new DslError("<Span> cannot contain another <Span>; put them side by side.", props.$source);
     if (ctx.inText && type !== "Span") {
       throw new DslError(`<Text> can only contain text and <Span>, not <${type}>. Put other elements next to the Text in a Row or Column.`, props.$source);
     }
-    validateProps(type, props);
-    const node = createNode(type, props);
+    const layer = layerProps(props);
+    validateProps(type, layer);
+    const node = createNode(type, layer);
     node.componentStack = captureComponentStack(fiber);
     return node;
   },
@@ -186,8 +191,8 @@ const hostConfig: any = {
   appendInitialChild: append,
   appendChild: append,
   appendChildToContainer: append,
-  insertBefore,
-  insertInContainerBefore: insertBefore,
+  insertBefore: append,
+  insertInContainerBefore: append,
   removeChild: (_parent: SceneNode, child: SceneNode) => detach(child),
   removeChildFromContainer: (_parent: SceneNode, child: SceneNode) => detach(child),
   clearContainer(root: SceneNode) {
@@ -197,8 +202,10 @@ const hostConfig: any = {
 
   finalizeInitialChildren: () => false,
   commitUpdate(instance: SceneNode, type: string, _old: unknown, next: Record<string, any>, fiber: any) {
-    validateProps(type, next);
-    instance.props = next;
+    if (type === MASK_TYPE) return;
+    const props = layerProps(next);
+    validateProps(type, props);
+    instance.props = props;
     instance.componentStack = captureComponentStack(fiber);
     invalidateText(instance);
   },
@@ -346,15 +353,20 @@ interface Placed {
 
 const placed = (hosts: SceneNode[]): Placed[] => hosts.map((host) => ({ host, layout: { ...host.layout } }));
 
+function buildLayer(host: SceneNode, parent: SceneNode | null, layout: Box, depth: number): SceneNode {
+  const node = layerOf(host, parent, layout);
+  if (host.type !== "Text") node.children = groupChildren(placed(layerChildren(host)), depth, node);
+  if (host.mask) node.mask = buildLayer(host.mask, node, { ...host.mask.layout }, depth);
+  return node;
+}
+
 function groupChildren(items: Placed[], depth: number, parent: SceneNode): SceneNode[] {
   const out: SceneNode[] = [];
   for (let i = 0; i < items.length; ) {
     const comp = items[i].host.componentStack?.[depth];
     if (!comp) {
       const { host, layout } = items[i++];
-      const node = layerOf(host, parent, layout);
-      if (host.type !== "Text") node.children = groupChildren(placed(layerChildren(host)), depth, node);
-      out.push(node);
+      out.push(buildLayer(host, parent, layout, depth));
       continue;
     }
 
@@ -388,7 +400,5 @@ function groupChildren(items: Placed[], depth: number, parent: SceneNode): Scene
  * coordinates rebased onto them. The host tree is left untouched.
  */
 export function groupComponents(root: SceneNode): SceneNode {
-  const layer = layerOf(root, null, { ...root.layout });
-  if (root.type !== "Text") layer.children = groupChildren(placed(layerChildren(root)), 0, layer);
-  return layer;
+  return buildLayer(root, null, { ...root.layout }, 0);
 }

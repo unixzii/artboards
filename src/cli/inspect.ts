@@ -1,7 +1,7 @@
 // Text/JSON views of a laid-out tree.
 
 import type { VariantInfo, VariantValue } from "../shared/dsl/variants.ts";
-import { formatPropsSummary, layerChildren, sourceOf, textContentOf, type SceneNode } from "../shared/scene.ts";
+import { MASK_TYPE, formatPropsSummary, layerChildren, sourceOf, textContentOf, type SceneNode } from "../shared/scene.ts";
 
 const showValue = (v: VariantValue) => JSON.stringify(v);
 
@@ -21,6 +21,7 @@ export function formatTree(root: SceneNode): string {
   const walk = (n: SceneNode, depth: number) => {
     line(n, depth);
     for (const c of layerChildren(n)) walk(c, depth + 1);
+    if (n.mask) walk(n.mask, depth + 1);
   };
   const line = (n: SceneNode, depth: number) => {
     const { x, y, width, height } = roundBox(n.layout);
@@ -34,7 +35,7 @@ export function formatTree(root: SceneNode): string {
     const text = n.type === "Text" ? ` ${JSON.stringify(textContentOf(n).slice(0, 40))}` : "";
     const name = n.props.name ? ` "${n.props.name}"` : "";
     lines.push(
-      `${"  ".repeat(depth)}${n.type}${name}${text}  [${x},${y} ${width}x${height}]  ${sourceOf(n) ?? ""}`.trimEnd(),
+      `${"  ".repeat(depth)}${n.type === MASK_TYPE ? "Mask (alpha)" : n.type}${name}${text}  [${x},${y} ${width}x${height}]  ${sourceOf(n) ?? ""}`.trimEnd(),
     );
   };
   walk(root, 0);
@@ -42,6 +43,9 @@ export function formatTree(root: SceneNode): string {
 }
 
 export function toJson(n: SceneNode): object {
+  if (n.type === MASK_TYPE) {
+    return { type: "Mask", mode: "alpha", layout: roundBox(n.layout), children: layerChildren(n).map(toJson) };
+  }
   if (n.component) {
     return {
       type: "Component",
@@ -52,7 +56,7 @@ export function toJson(n: SceneNode): object {
       children: layerChildren(n).map(toJson),
     };
   }
-  const { children: _c, $source, ...props } = n.props;
+  const { children: _c, mask: _mask, $source, ...props } = n.props;
   return {
     type: n.type,
     ...(n.type === "Text" ? { text: textContentOf(n), ...(n.runs && n.runs.length > 1 ? { runs: n.runs.map(({ text, props }) => ({ text, props })) } : {}) } : {}),
@@ -60,5 +64,6 @@ export function toJson(n: SceneNode): object {
     layout: roundBox(n.layout),
     source: $source,
     children: layerChildren(n).map(toJson),
+    ...(n.mask ? { mask: toJson(n.mask) } : {}),
   };
 }

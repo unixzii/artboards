@@ -206,3 +206,36 @@ export function Images() {
     </Frame>
   );
 }
+
+export function Masks() {
+  return (
+    <Frame width={480} height={240} fill="#fafaf9">
+      <Row width="fill" padding={24} gap={16}>
+        <Column width="fill" gap={10}>
+          <Caption>ELLIPSE MASK</Caption>
+          <Image
+            src={latte}
+            width="fill"
+            height={156}
+            mask={<Ellipse width="fill" height="fill" fill="#fff" />}
+          />
+        </Column>
+        <Column width="fill" gap={10}>
+          <Caption>GRADIENT FADE</Caption>
+          <Image
+            src={latte}
+            width="fill"
+            height={156}
+            mask={
+              <Rect
+                width="fill"
+                height="fill"
+                fill={{ type: "linear", angle: 180, stops: [{ color: "#fff", position: 0.3 }, "#ffffff00"] }}
+              />
+            }
+          />
+        </Column>
+      </Row>
+    </Frame>
+  );
+}

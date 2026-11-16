@@ -6,6 +6,7 @@ import {
   expandCorners,
   expandSides,
   isComponentNode,
+  MASK_TYPE,
   parseViewBox,
   type Fill,
   type GradientStop,
@@ -37,9 +38,12 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   canvas.translate(x, y);
   if (p.rotation) canvas.rotate(p.rotation, w / 2, h / 2);
 
+  if (node.mask) canvas.saveLayer();
+
   // Frosted glass reads what is already on the canvas, so it goes before any
   // opacity layer (which starts out empty).
-  const box = isComponentNode(node) || node.type === "Text" || node.type === "Path" ? null : boxGeometry(node);
+  const group = isComponentNode(node) || node.type === MASK_TYPE;
+  const box = group || node.type === "Text" || node.type === "Path" ? null : boxGeometry(node);
   if (box && (p.backdropBlur ?? 0) > 0 && w > 0 && h > 0) {
     backdropBlur(ck, canvas, p.backdropBlur, (op) => canvas.clipRRect(box.rrect(ck, ZERO), op, true));
   }
@@ -52,7 +56,7 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
     layer.delete();
   }
 
-  if (isComponentNode(node)) {
+  if (group) {
     for (const child of node.children) paintNode(engine, canvas, child, greekBelow);
   } else if (node.type === "Text" && textSizeOf(node) < greekBelow) {
     const para = paragraphFor(engine, node);
@@ -72,6 +76,16 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   }
 
   if (opacity < 1) canvas.restore();
+  if (node.mask) {
+    // The transparent pixels of this isolated layer also take part in DstIn.
+    const mask = new ck.Paint();
+    mask.setBlendMode(ck.BlendMode.DstIn);
+    canvas.saveLayer(mask);
+    mask.delete();
+    paintNode(engine, canvas, node.mask);
+    canvas.restore();
+    canvas.restore();
+  }
   canvas.restore();
 }
 

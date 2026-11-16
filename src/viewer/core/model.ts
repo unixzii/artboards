@@ -4,7 +4,7 @@
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
-import { COMPONENT_TYPE, expandSides, layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   /** "<artboard>/<path>", stable across rebuilds. */
@@ -16,6 +16,7 @@ export interface ViewNode extends PaintableNode {
   /** Local -> artboard affine transform `[a, b, c, d, e, f]` (x' = a·x + c·y + e, y' = b·x + d·y + f), rotation included. */
   matrix: Affine;
   children: ViewNode[];
+  mask?: ViewNode;
   parent: ViewNode | null;
   /** Scroll containers only: the furthest the content can scroll on each axis (0 for an axis it does not scroll). */
   scrollMax?: Point;
@@ -107,8 +108,9 @@ const FAILED = { w: 480, h: 200 };
 /** Sets a node's artboard position and transform from its parent's, after the parent's scroll offset. */
 function place(node: ViewNode) {
   const parent = node.parent;
-  const sx = parent?.scroll?.x ?? 0;
-  const sy = parent?.scroll?.y ?? 0;
+  const scroll = node.type === MASK_TYPE ? undefined : parent?.scroll;
+  const sx = scroll?.x ?? 0;
+  const sy = scroll?.y ?? 0;
   node.abs = { x: (parent?.abs.x ?? 0) - sx + node.layout.x, y: (parent?.abs.y ?? 0) - sy + node.layout.y };
   const content = sx || sy ? multiply(parent!.matrix, [1, 0, 0, 1, -sx, -sy]) : (parent?.matrix ?? IDENTITY);
   node.matrix = multiply(content, placement(node.layout, node.props.rotation));
@@ -170,6 +172,7 @@ function hydrate(
   }
   place(node);
   node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes, scrolls));
+  if (n.mask) node.mask = hydrate(n.mask, frame, path === "" ? "mask" : `${path}.mask`, node, nodes, scrolls);
   nodes.set(node.key, node);
   return node;
 }
@@ -186,12 +189,11 @@ export function scrollNode(node: ViewNode, dx: number, dy: number): boolean {
   if (x === scroll.x && y === scroll.y) return false;
   node.scroll = { x, y };
   const replace = (n: ViewNode) => {
-    for (const c of n.children) {
-      place(c);
-      replace(c);
-    }
+    place(n);
+    for (const c of n.children) replace(c);
+    if (n.mask) replace(n.mask);
   };
-  replace(node);
+  for (const c of node.children) replace(c);
   return true;
 }
 
@@ -245,6 +247,7 @@ export function sizing(node: ViewNode, axis: "width" | "height"): Sizing | null 
   let host = node;
   while (host.type === COMPONENT_TYPE && host.children.length === 1) host = host.children[0];
   if (host.type === COMPONENT_TYPE) return null;
+  if (host.type === MASK_TYPE) return "Fixed";
   const p = host.props;
   const v = p[axis];
   if (typeof v === "number") return "Fixed";
@@ -299,17 +302,21 @@ export function bounds(frames: ViewFrame[]) {
   };
 }
 
-function hitNode(n: ViewNode, px: number, py: number): ViewNode | null {
+type MaskCoverage = (mask: ViewNode, x: number, y: number) => boolean;
+
+function hitNode(n: ViewNode, px: number, py: number, maskCovers: MaskCoverage): ViewNode | null {
   const { x: lx, y: ly } = toLocal(n, px, py);
   const inside = lx >= 0 && ly >= 0 && lx <= n.layout.width && ly <= n.layout.height;
   if ((n.props.clip || n.props.scroll) && !inside) return null;
   const cx = lx + (n.scroll?.x ?? 0);
   const cy = ly + (n.scroll?.y ?? 0);
+  let hit: ViewNode | null = null;
   for (let i = n.children.length - 1; i >= 0; i--) {
-    const hit = hitNode(n.children[i], cx, cy);
-    if (hit) return hit;
+    hit = hitNode(n.children[i], cx, cy, maskCovers);
+    if (hit) break;
   }
-  return inside && !n.component ? n : null;
+  if (!hit && inside && !n.component) hit = n;
+  return hit && (!n.mask || maskCovers(n.mask, lx, ly)) ? hit : null;
 }
 
 /** Nearest enclosing user component instance above `node`, if any. */
@@ -321,11 +328,11 @@ export function enclosingComponent(node: ViewNode): ViewNode | null {
 }
 
 /** Deepest layer under a canvas point. */
-export function hitTest(model: Model, world: Point): ViewNode | null {
+export function hitTest(model: Model, world: Point, maskCovers: MaskCoverage): ViewNode | null {
   for (let i = model.frames.length - 1; i >= 0; i--) {
     const f = model.frames[i];
     if (!f.root || world.x < f.x || world.y < f.y || world.x > f.x + f.w || world.y > f.y + f.h) continue;
-    return hitNode(f.root, world.x - f.x, world.y - f.y);
+    return hitNode(f.root, world.x - f.x, world.y - f.y, maskCovers);
   }
   return null;
 }

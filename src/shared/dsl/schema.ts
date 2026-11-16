@@ -23,6 +23,7 @@ type PropType =
   | { kind: "fontWeight" }
   | { kind: "viewBox" }
   | { kind: "handler" }
+  | { kind: "jsx" }
   | { kind: "enum"; values: readonly string[] }
   | { kind: "children"; of: "nodes" | "text" | "runs" };
 
@@ -63,6 +64,7 @@ const box = {
   rowSpan: int("Number of rows this child spans inside a <Grid>.", "1"),
   opacity: num("Opacity of the element and everything inside it, 0..1.", "1", 0, 1),
   rotation: { type: { kind: "number", min: -Infinity }, doc: "Clockwise rotation in degrees around the centre. Paint only: layout uses the unrotated box.", default: "0" },
+  mask: { type: { kind: "jsx" }, doc: "A JSX alpha mask, laid out against this layer's bounds without affecting its size." },
   name: { type: { kind: "string" }, doc: "Layer name shown in inspect output and diagnostics." },
   onClick: {
     type: { kind: "handler" },
@@ -132,7 +134,7 @@ const textStyle = {
 
 /** Prop sets shared by several elements; the .d.ts declares each once as `<Name>Props`. */
 const GROUPS = {
-  Layer: { doc: "Props every element but <Span> takes: size, placement, opacity, rotation, name and onClick.", props: box },
+  Layer: { doc: "Props every element but <Span> takes: size, placement, opacity, rotation, mask, name and onClick.", props: box },
   Paint: { doc: "Fill, border paint and effects of a shape.", props: paint },
   Border: { doc: "Border geometry of a rectangular box.", props: border },
   Container: { doc: "Props of an element that holds child elements.", props: container },
@@ -411,6 +413,8 @@ function describe(t: PropType, prop: string): string {
       return "a number from 1 to 1000 (400 regular, 700 bold)";
     case "handler":
       return "a function";
+    case "jsx":
+      return "a JSX element passed in JSX syntax, or false";
     case "viewBox":
       return '`[minX, minY, width, height]` or `"minX minY width height"` with positive width and height';
     case "enum":
@@ -461,6 +465,8 @@ function matches(t: PropType, v: unknown, prop: string): boolean {
       return parseViewBox(v) !== null;
     case "handler":
       return typeof v === "function";
+    case "jsx":
+      return v === false; // The JSX runtime moves an element into a reconciled slot.
     case "enum":
       return typeof v === "string" && t.values.includes(v);
     case "children":
@@ -547,6 +553,8 @@ function tsType(t: PropType, prop: string): string {
       return "ViewBox";
     case "handler":
       return "() => void";
+    case "jsx":
+      return "ReactElement | false | null";
     case "enum":
       return t.values.map((v) => JSON.stringify(v)).join(" | ");
     case "children":

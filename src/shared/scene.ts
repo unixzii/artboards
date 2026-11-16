@@ -110,6 +110,7 @@ export function parseViewBox(vb: unknown): [number, number, number, number] | nu
 }
 
 export const COMPONENT_TYPE = "#component";
+export const MASK_TYPE = "#mask";
 
 export function isComponentNode(node: { type: string }): boolean {
   return node.type === COMPONENT_TYPE;
@@ -128,6 +129,8 @@ export interface PaintableNode {
   type: string;
   props: Record<string, any>;
   children: PaintableNode[];
+  /** Isolated alpha mask, positioned in this node's own coordinates. */
+  mask?: PaintableNode;
   /** Position relative to parent, filled in by layout. */
   layout: Box;
   /** Present when this node represents a virtual component instance (`type === "#component"`). */
@@ -150,6 +153,7 @@ export interface SceneNode extends PaintableNode {
   id: number;
   type: string; // "Frame" | "Row" | ... | "#component" | "#text" | "#root"
   children: SceneNode[];
+  mask?: SceneNode;
   parent: SceneNode | null;
   /** Host nodes only: outermost-to-innermost component instances enclosing this node. */
   componentStack?: ComponentInfo[];
@@ -218,9 +222,18 @@ export function layerHint(node: PaintableNode): string {
   return node.type === "Text" ? textContentOf(node) : (node.props.name ?? "");
 }
 
-export function walk<N extends { children: N[] }>(node: N, fn: (n: N, depth: number) => void, depth = 0) {
-  fn(node, depth);
-  for (const c of node.children) walk(c, fn, depth + 1);
+/** Visits the content tree, optionally visiting each node's mask before its children. */
+export function walk<N extends { children: N[]; mask?: N }>(
+  root: N,
+  fn: (node: N, depth: number) => void,
+  { includeMasks = false }: { includeMasks?: boolean } = {},
+) {
+  function visit(node: N, depth: number) {
+    fn(node, depth);
+    if (includeMasks && node.mask) visit(node.mask, depth + 1);
+    for (const child of node.children) visit(child, depth + 1);
+  }
+  visit(root, 0);
 }
 
 /** Layer children: everything except raw text instances and the <Span>s inside a Text. */
@@ -230,18 +243,19 @@ export function layerChildren<N extends { type: string; children: N[] }>(node: N
 
 /**
  * Child-index path from the artboard root, e.g. "0.2.1" ("" for the root).
+ * A mask slot uses "mask" in place of a child index.
  * With the artboard name it identifies a layer across rebuilds.
  */
 export function nodePath(node: SceneNode): string {
-  const parts: number[] = [];
+  const parts: (number | "mask")[] = [];
   for (let n = node; n.parent && n.parent.type !== "#root"; n = n.parent) {
-    parts.unshift(layerChildren(n.parent).indexOf(n));
+    parts.unshift(n === n.parent.mask ? "mask" : layerChildren(n.parent).indexOf(n));
   }
   return parts.join(".");
 }
 
 export function nodeAtPath(root: SceneNode, path: string): SceneNode | undefined {
   let node: SceneNode | undefined = root;
-  for (const i of path === "" ? [] : path.split(".")) node = node && layerChildren(node)[Number(i)];
+  for (const i of path === "" ? [] : path.split(".")) node = node && (i === "mask" ? node.mask : layerChildren(node)[Number(i)]);
   return node;
 }

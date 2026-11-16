@@ -52,6 +52,26 @@ cannot say.
 - Figma's inner shadow is `shadow={{ y: 1, blur: 2, color: "rgba(0,0,0,0.12)", inset: true }}`; mix drop and inset
   shadows in one array. Text takes drop shadows only.
 
+## Masks
+
+Pass JSX as `mask` on a layer. The mask's alpha sets how much of the layer and its descendants
+show through: opaque pixels keep the original paint, transparent pixels hide it, and partial alpha
+fades it. The mask's colors don't tint the result.
+
+```tsx
+<Image
+  src={photo}
+  width={240}
+  height={160}
+  mask={<Ellipse width="fill" height="fill" fill="#fff" />}
+/>
+```
+
+Give a shape a `fill` to reveal its interior. You can also use a gradient, image with transparency,
+text, or a component. Mask JSX is positioned like the children of a `Frame` the size of the target:
+`x` and `y` are local to the target and `"fill"` spans its bounds. The mask takes no space in layout
+and doesn't contribute to the target's `"hug"` size. Use `null`, `undefined`, or `false` to turn it off.
+
 ## Text
 
 - Mix styles in one paragraph with <Span>: `<Text fontSize={14}>¥<Span fontSize={28} fontWeight={700}>28</Span></Text>`.

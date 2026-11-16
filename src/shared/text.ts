@@ -234,4 +234,5 @@ export function releaseParagraphs(root: PaintableNode) {
     root.paragraph = undefined;
   }
   for (const c of root.children) releaseParagraphs(c);
+  if (root.mask) releaseParagraphs(root.mask);
 }
