@@ -20,7 +20,7 @@ export function ProblemItem({ problem }: { problem: Diagnostic }) {
             <TriangleAlert size={12} className="sev-icon" />
           )}
           <span className="rule">{problem.rule}</span>
-          <span>{problem.source}</span>
+          <span className="where">{problem.source}</span>
         </>
       }
     >

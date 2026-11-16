@@ -13,7 +13,7 @@ function CommentItem({ comment }: { comment: ResolvedComment }) {
       head={
         <>
           <CommentNumber id={comment.id} />
-          <span>
+          <span className="where">
             {comment.frame} {comment.target}
           </span>
           {!comment.attached && <span className="badge">layer changed</span>}

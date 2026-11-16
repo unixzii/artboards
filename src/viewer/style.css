@@ -253,7 +253,13 @@ svg.lucide { flex: none; display: block; }
 .item { padding: 6px 12px; cursor: pointer; border-top: 1px solid var(--line); }
 .item:first-child { border-top: 0; }
 .item:hover { background: var(--hover); }
-.item .head { display: flex; gap: 5px; align-items: center; color: var(--muted); }
+/* Icon, rule and number keep to the first line; only the location (.where) wraps,
+   under itself. Top-aligned with the icon centred in a line-tall box, so all of
+   them sit on the first line's baseline. */
+.item .head { display: flex; gap: 5px; align-items: flex-start; color: var(--muted); }
+.item .head > * { flex: none; white-space: nowrap; }
+.item .head > svg { height: 1.45em; }
+.item .head > .where { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .item .sev-icon { color: var(--warn); }
 .item.error .sev-icon { color: var(--error); }
 .item .rule { font-weight: 600; color: var(--warn); }
@@ -269,6 +275,7 @@ svg.lucide { flex: none; display: block; }
   background: none;
   padding: 0;
   color: var(--accent);
+  text-align: left;
   cursor: pointer;
 }
 .link:hover { text-decoration: underline; }
@@ -308,6 +315,9 @@ svg.lucide { flex: none; display: block; }
   font-family: ui-monospace, Menlo, monospace;
   font-size: 11px;
 }
+/* A long path wraps left-aligned, with the copy icon following its last line. */
+.prop-head .source .link { display: inline; overflow-wrap: anywhere; }
+.prop-head .source .link > svg { display: inline-block; margin-left: 4px; vertical-align: -1px; }
 .prop-head .owner { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: var(--muted); font-size: 11px; }
 .prop-head .owner .link { color: var(--comp); }
 .prop-group { padding-bottom: 4px; }
