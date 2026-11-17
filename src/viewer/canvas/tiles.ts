@@ -187,6 +187,8 @@ export class TileCache {
   private overview = new TilePool();
   private detail = new TilePool();
   private repainted = new Map<string, number>();
+  /** How long each artboard's last recording took (ms), to skip ones a gesture frame can't afford. */
+  private recordCost = new Map<string, number>();
   private serial = 0;
 
   constructor(engine: RenderEngine) {
@@ -210,6 +212,7 @@ export class TileCache {
     for (const name of [...this.recordings.keys()]) this.forget(name);
     this.dropTextures();
     this.repainted.clear();
+    this.recordCost.clear();
   }
 
   /** Reconciles caches with a new frame list, retaining unchanged artboards' pictures and tiles. */
@@ -222,6 +225,7 @@ export class TileCache {
     const keep = new Set(nextFrames.map((f) => f.name));
     for (const name of [...this.recordings.keys()]) if (!keep.has(name)) this.forget(name);
     for (const name of [...this.repainted.keys()]) if (!keep.has(name)) this.repainted.delete(name);
+    for (const name of [...this.recordCost.keys()]) if (!keep.has(name)) this.recordCost.delete(name);
     this.detail.prune(keep);
     this.overview.prune(keep);
 
@@ -274,6 +278,10 @@ export class TileCache {
     this.recordings.delete(name);
   }
 
+  private hasPicture(f: ViewFrame, viewScale: number): boolean {
+    return !!this.recordings.get(f.name)?.has(quantizeLod(viewScale).level);
+  }
+
   private pictureFor(f: ViewFrame, viewScale: number, budget: WorkBudget): SkPicture | null {
     if (!f.root) return null;
     let levels = this.recordings.get(f.name);
@@ -290,8 +298,10 @@ export class TileCache {
       picture = recorder.finishRecordingAsPicture();
       recorder.delete();
       levels.set(level, picture);
+      const cost = performance.now() - t0;
+      this.recordCost.set(f.name, cost);
       budget.ops++;
-      budget.spentMs += performance.now() - t0;
+      budget.spentMs += cost;
     }
     return picture;
   }
@@ -315,15 +325,24 @@ export class TileCache {
       return null;
     }
 
+    // Content that just changed (motion in Play mode) gets a new tree every
+    // frame, so a recording of it is dropped before the next frame. Normally
+    // it is rasterized right away, even over budget, or the screen would hold
+    // a stale tile for as long as the motion stays expensive. During a pan or
+    // zoom the gesture comes first: such an artboard keeps its current tiles
+    // unless the recording fits what is left of the budget.
+    const live = this.changedRecently(f);
+    const gesture = ctx.panning || ctx.zooming;
+    if (live && gesture && !this.hasPicture(f, targetScale / ctx.dpr) && (this.recordCost.get(f.name) ?? 0) > limitMs - budget.spentMs) {
+      if (deferOnSkip) budget.deferred = true;
+      return null;
+    }
+
     const opsBefore = budget.ops;
     const pic = this.pictureFor(f, targetScale / ctx.dpr, budget);
     if (!pic) return null;
-    // A recording that used up the budget is normally rasterized next frame. An
-    // artboard whose content just changed (motion in Play mode) gets a new tree
-    // every frame, which drops the recording before it was ever shown, so the
-    // screen would hold a stale tile for as long as the motion stays expensive.
-    // Rasterize it now instead: the budget still keeps later artboards waiting.
-    if (budget.ops > opsBefore && budget.spentMs >= limitMs && !this.changedRecently(f)) {
+    // A recording that used up the budget is otherwise rasterized next frame.
+    if (budget.ops > opsBefore && budget.spentMs >= limitMs && !(live && !gesture)) {
       if (deferOnSkip) budget.deferred = true;
       return null;
     }
@@ -421,9 +440,11 @@ export class TileCache {
       return compose();
     }
 
+    // Past this point during a gesture means the artboard changed recently; the gesture keeps its tighter budget.
+    const limitMs = ctx.zooming || ctx.panning ? MOTION_BUDGET_MS : SETTLED_BUDGET_MS;
     if (baseSufficient) {
       if (base && !base.stale) return [base];
-      const created = requestBase(SETTLED_BUDGET_MS);
+      const created = requestBase(limitMs);
       return created ? [created] : compose();
     }
 
@@ -438,16 +459,16 @@ export class TileCache {
 
     const needBase = !repaintedRecently && (!base || base.stale);
     if (detail && detailReady) {
-      if (needBase) requestBase(SETTLED_BUDGET_MS);
+      if (needBase) requestBase(limitMs);
       return [detail];
     }
 
-    const next = this.requestTile(this.detail, detailLimit, f, box, scale, ctx, SETTLED_BUDGET_MS, true, budget);
+    const next = this.requestTile(this.detail, detailLimit, f, box, scale, ctx, limitMs, true, budget);
     if (next) {
       if (needBase) budget.deferred = true;
       return [next];
     }
-    if (needBase) base = requestBase(SETTLED_BUDGET_MS) ?? base;
+    if (needBase) base = requestBase(limitMs) ?? base;
     return compose();
   }
 }
