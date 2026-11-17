@@ -248,6 +248,29 @@ svg.lucide { flex: none; display: block; }
 .layer.artboard .type { font-weight: 600; }
 .layer .detail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .layer .mask-label { margin-left: auto; flex: none; color: var(--muted); }
+/* Eye toggle at the trailing edge: on hover, in place of the label; always while hidden. */
+.layer .layer-eye {
+  display: none;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0 -4px 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.layer:hover .layer-eye,
+.layer.is-hidden .layer-eye { display: grid; }
+.layer .layer-eye:hover { color: var(--text); background: rgba(127, 127, 127, 0.14); }
+.layer:hover .mask-label,
+.layer.is-hidden .mask-label { display: none; }
+.layer.dimmed > .layer-icon-slot,
+.layer.dimmed > .type,
+.layer.dimmed > .detail { opacity: 0.45; }
 
 /* Component & component-descendant tint (orthogonal to selection background) */
 .layer.in-component .layer-icon,

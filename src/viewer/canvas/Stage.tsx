@@ -76,6 +76,7 @@ function Pins() {
   const viewer = useViewer();
   const model = useViewerState((s) => s.model);
   useViewerState((s) => s.scrollTick); // pins follow layers that scroll
+  useViewerState((s) => s.hiddenLayers); // and hide with them
   const comments = useViewerState((s) => s.comments);
   return comments
     .filter((c) => !c.resolved && !model.frames.find((f) => f.name === c.frame)?.modified)

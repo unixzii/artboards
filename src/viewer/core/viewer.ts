@@ -44,6 +44,8 @@ export interface ViewerState {
   measuring: boolean;
   /** Both side panels are hidden, leaving the canvas the whole window. */
   panelsHidden: boolean;
+  /** Layers hidden with the eye toggle in the layer list, by key. Viewer only; kept across rebuilds. */
+  hiddenLayers: ReadonlySet<string>;
   /** "static": a site from `artboards build`; comments stay in this browser until exported. */
   mode: Backend["mode"];
   /** Artboards whose motion is playing right now, by name. */
@@ -96,6 +98,7 @@ export class Viewer {
     scrollTick: 0,
     measuring: false,
     panelsHidden: false,
+    hiddenLayers: new Set(),
     mode: "dev",
     animating: new Set(),
     paused: false,
@@ -210,7 +213,8 @@ export class Viewer {
   private syncScene() {
     const renderer = this.renderer;
     if (!renderer) return;
-    const model = buildModel(this.host.frames, this.scrolls, this.store.get().model);
+    const state = this.store.get();
+    const model = buildModel(this.host.frames, { scrolls: this.scrolls, hidden: state.hiddenLayers }, state.model);
     renderer.setModel(model);
 
     const prev = this.store.get();
@@ -484,6 +488,24 @@ export class Viewer {
     if (this.captured?.key.startsWith(`${frame}/`)) this.captured = null;
     const byId = this.store.get().model.byId;
     this.hoveredIds = this.hoveredIds.filter((id) => byId.get(id)?.frame.name !== frame);
+  }
+
+  /**
+   * Hides a layer and everything in it, or shows it again. Hiding every layer
+   * of a mask takes the mask off. Only the viewer sees it: the design, its
+   * screenshots and comments are untouched.
+   */
+  toggleHidden(key: string) {
+    const node = this.node(key);
+    if (!node) return;
+    const hiddenLayers = new Set(this.store.get().hiddenLayers);
+    if (hiddenLayers.delete(key)) node.hidden = undefined;
+    else {
+      hiddenLayers.add(key);
+      node.hidden = true;
+    }
+    this.store.set({ hiddenLayers });
+    this.renderer?.refreshFrame(node.frame);
   }
 
   /** Hides or shows both side panels at once. */

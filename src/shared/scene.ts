@@ -186,6 +186,14 @@ export interface PaintableNode {
   missingGlyphs?: string[];
   /** Viewer only: how far a `scroll` container's content is scrolled, in px. */
   scroll?: { x: number; y: number };
+  /** Viewer only: hidden with the layer list's eye toggle. Neither it nor its subtree is painted or hit. */
+  hidden?: boolean;
+}
+
+/** The node's mask, unless every layer in it is hidden: then the content shows unmasked. */
+export function activeMask<N extends PaintableNode>(node: N): N | undefined {
+  const mask = node.mask as N | undefined;
+  return mask && mask.children.some((c) => !c.hidden) ? mask : undefined;
 }
 
 export interface SceneNode extends PaintableNode {

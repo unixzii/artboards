@@ -4,6 +4,7 @@ import type { Canvas, CanvasKit, ImageFilter, Paint, Paragraph, Path } from "can
 import { parseColor } from "./color.ts";
 import type { RenderEngine } from "./engine.ts";
 import {
+  activeMask,
   expandCorners,
   expandSides,
   isComponentNode,
@@ -85,7 +86,7 @@ function getRawSvgPath(ck: CanvasKit, d: string): Path | null {
  * this for text too small on screen to read, which is costly to rasterise.
  */
 export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableNode, greekBelow = 0) {
-  if (node.type === "#text" || node.type === "Span") return;
+  if (node.type === "#text" || node.type === "Span" || node.hidden) return;
   const { ck } = engine;
   const { x, y, width: w, height: h } = node.layout;
   const p = node.props;
@@ -98,7 +99,8 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
     canvas.concat([a, c, e, b, d, f, 0, 0, 1]);
   }
 
-  if (node.mask) canvas.saveLayer();
+  const mask = activeMask(node);
+  if (mask) canvas.saveLayer();
 
   // Frosted glass samples the backdrop before the layer's own paint is isolated.
   const group = isComponentNode(node) || node.type === MASK_TYPE;
@@ -145,13 +147,13 @@ export function paintNode(engine: RenderEngine, canvas: Canvas, node: PaintableN
   }
 
   if (isolate) canvas.restore();
-  if (node.mask) {
+  if (mask) {
     // The transparent pixels of this isolated layer also take part in DstIn.
-    const mask = new ck.Paint();
-    mask.setBlendMode(ck.BlendMode.DstIn);
-    canvas.saveLayer(mask);
-    mask.delete();
-    paintNode(engine, canvas, node.mask);
+    const dstIn = new ck.Paint();
+    dstIn.setBlendMode(ck.BlendMode.DstIn);
+    canvas.saveLayer(dstIn);
+    dstIn.delete();
+    paintNode(engine, canvas, mask);
     canvas.restore();
     canvas.restore();
   }

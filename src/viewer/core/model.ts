@@ -4,7 +4,7 @@
 import type { Diagnostic } from "../../shared/diagnostics.ts";
 import type { VariantInfo } from "../../shared/dsl/variants.ts";
 import type { ResolvedComment } from "../../shared/protocol.ts";
-import { COMPONENT_TYPE, MASK_TYPE, expandSides, layerChildren, layerHint, textContentOf, paintTransform, type Affine, type MouseEvent, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
+import { COMPONENT_TYPE, MASK_TYPE, activeMask, expandSides, layerChildren, layerHint, textContentOf, paintTransform, type Affine, type MouseEvent, type PaintableNode, type SceneNode } from "../../shared/scene.ts";
 
 export interface ViewNode extends PaintableNode {
   id: number;
@@ -22,6 +22,14 @@ export interface ViewNode extends PaintableNode {
   /** Scroll containers only: the furthest the content can scroll on each axis (0 for an axis it does not scroll). */
   scrollMax?: Point;
 }
+
+/** What the viewer keeps per layer key across rebuilds: scroll offsets, and layers hidden with the eye toggle. */
+export interface ViewerLayerState {
+  scrolls: ReadonlyMap<string, Point>;
+  hidden: ReadonlySet<string>;
+}
+
+const NO_LAYER_STATE: ViewerLayerState = { scrolls: new Map(), hidden: new Set() };
 
 export interface LiveFrameInput {
   name: string;
@@ -165,7 +173,7 @@ function hydrate(
   parent: ViewNode | null,
   nodes: ViewFrame["nodes"],
   byId: ViewFrame["byId"],
-  scrolls: ReadonlyMap<string, Point>,
+  view: ViewerLayerState,
 ): ViewNode {
   // The artboard root sits at its frame's origin, whatever x/y it was given.
   const layout = parent ? n.layout : { ...n.layout, x: 0, y: 0 };
@@ -192,13 +200,14 @@ function hydrate(
   };
   if (props.scroll && n.type !== "Text") {
     const max = scrollRange(n);
-    const kept = scrolls.get(key);
+    const kept = view.scrolls.get(key);
     node.scrollMax = max;
     node.scroll = { x: clamp(kept?.x ?? 0, max.x), y: clamp(kept?.y ?? 0, max.y) };
   }
+  if (view.hidden.has(key)) node.hidden = true;
   place(node);
-  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes, byId, scrolls));
-  if (n.mask) node.mask = hydrate(n.mask, frame, path === "" ? "mask" : `${path}.mask`, node, nodes, byId, scrolls);
+  node.children = n.type === "Text" ? [] : layerChildren(n).map((c, i) => hydrate(c, frame, path === "" ? String(i) : `${path}.${i}`, node, nodes, byId, view));
+  if (n.mask) node.mask = hydrate(n.mask, frame, path === "" ? "mask" : `${path}.mask`, node, nodes, byId, view);
   nodes.set(node.key, node);
   byId.set(node.id, node);
   return node;
@@ -245,7 +254,7 @@ const sameVariants = (a: VariantInfo[], b: VariantInfo[]) =>
  * rows. Artboards whose tree, state and place are the same as in `prev` are
  * carried over untouched, so an animating artboard doesn't rebuild the rest.
  */
-export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string, Point> = new Map(), prev: Model = EMPTY_MODEL): Model {
+export function buildModel(inputs: LiveFrameInput[], view: ViewerLayerState = NO_LAYER_STATE, prev: Model = EMPTY_MODEL): Model {
   const before = new Map(prev.frames.map((f) => [f.name, f]));
   let x = 0;
   let y = 0;
@@ -289,7 +298,7 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
           nodes: new Map(),
           byId: new Map(),
         };
-    if (!kept && input.root) frame.root = hydrate(input.root, frame, "", null, frame.nodes, frame.byId, scrolls);
+    if (!kept && input.root) frame.root = hydrate(input.root, frame, "", null, frame.nodes, frame.byId, view);
     x += w + GAP;
     rowHeight = Math.max(rowHeight, h);
     return frame;
@@ -369,6 +378,7 @@ export function bounds(frames: ViewFrame[]) {
 type MaskCoverage = (mask: ViewNode, x: number, y: number) => boolean;
 
 function hitNode(n: ViewNode, px: number, py: number, maskCovers: MaskCoverage): ViewNode | null {
+  if (n.hidden) return null;
   const { x: lx, y: ly } = toLocal(n, px, py);
   const inside = lx >= 0 && ly >= 0 && lx <= n.layout.width && ly <= n.layout.height;
   if ((n.props.clip || n.props.scroll) && !inside) return null;
@@ -380,7 +390,8 @@ function hitNode(n: ViewNode, px: number, py: number, maskCovers: MaskCoverage):
     if (hit) break;
   }
   if (!hit && inside && !n.component) hit = n;
-  return hit && (!n.mask || maskCovers(n.mask, lx, ly)) ? hit : null;
+  const mask = activeMask(n);
+  return hit && (!mask || maskCovers(mask, lx, ly)) ? hit : null;
 }
 
 /** Nearest enclosing user component instance above `node`, if any. */
@@ -413,6 +424,12 @@ export function toLayer(node: ViewNode, artboard: Point): Point {
   return apply(invert(node.matrix), artboard);
 }
 
+/** Whether the layer or a layer it is in was hidden with the eye toggle. */
+export function isHidden(node: ViewNode): boolean {
+  for (let n: ViewNode | null = node; n; n = n.parent) if (n.hidden) return true;
+  return false;
+}
+
 /** Whether an artboard point is inside every clipping or scrolling layer above `node`. */
 function unclipped(node: ViewNode, artboard: Point): boolean {
   for (let n = node.parent; n; n = n.parent) {
@@ -431,7 +448,7 @@ function unclipped(node: ViewNode, artboard: Point): boolean {
 export function pinPosition(comment: ResolvedComment, model: Model): Point | null {
   const frame = model.frames.find((f) => f.name === comment.frame);
   const n = comment.attached ? model.nodes.get(nodeKey(comment.frame, comment.path)) : null;
-  if (!frame || !n) return null;
+  if (!frame || !n || isHidden(n)) return null;
   // A layer that shrank keeps the pin on its edge.
   const at = apply(n.matrix, { x: clamp(comment.point.x, n.layout.width), y: clamp(comment.point.y, n.layout.height) });
   if (!unclipped(n, at)) return null;

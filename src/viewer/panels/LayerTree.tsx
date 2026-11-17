@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 import { MASK_TYPE } from "../../shared/scene.ts";
 import { Empty } from "../components/primitives.tsx";
@@ -17,6 +17,10 @@ interface FlatRow {
   selectionRole: SelectionRole;
   selectionEdge: SelectionEdge;
   maskDistance: number;
+  /** Hidden with its own eye toggle. */
+  hidden: boolean;
+  /** Hidden itself or inside a hidden layer: drawn dimmed. */
+  dimmed: boolean;
 }
 
 // Memoised: hovering changes two rows, not the whole tree.
@@ -27,12 +31,14 @@ const LayerRow = memo(function LayerRow(props: {
   selectionRole: SelectionRole;
   selectionEdge: SelectionEdge;
   maskDistance: number;
+  hidden: boolean;
+  dimmed: boolean;
   startsFrame: boolean;
   hovered: boolean;
   collapsed: boolean;
   onToggle: (key: string) => void;
 }) {
-  const { node, depth, inComponent, selectionRole, selectionEdge, maskDistance, startsFrame, hovered, collapsed, onToggle } = props;
+  const { node, depth, inComponent, selectionRole, selectionEdge, maskDistance, hidden, dimmed, startsFrame, hovered, collapsed, onToggle } = props;
   const viewer = useViewer();
   const row = useRef<HTMLDivElement>(null);
   const isRootSelected = selectionRole === "root";
@@ -54,6 +60,8 @@ const LayerRow = memo(function LayerRow(props: {
     selectionRole === "descendant" && "selected-descendant",
     selectionEdge !== "none" && `sel-${selectionEdge}`,
     hovered && "hover",
+    hidden && "is-hidden",
+    dimmed && "dimmed",
   ]
     .filter(Boolean)
     .join(" ");
@@ -61,6 +69,10 @@ const LayerRow = memo(function LayerRow(props: {
   const toggle = (e: MouseEvent) => {
     e.stopPropagation();
     onToggle(node.key);
+  };
+  const toggleHidden = (e: MouseEvent) => {
+    e.stopPropagation();
+    viewer.toggleHidden(node.key);
   };
 
   return (
@@ -84,6 +96,10 @@ const LayerRow = memo(function LayerRow(props: {
       <span className="type">{isArtboard ? node.frame.name : comp ? comp.name : node.type}</span>
       <span className="detail">{isArtboard ? node.type : describe(node)}</span>
       {node.parent?.type === MASK_TYPE && <span className="mask-label">Mask</span>}
+      {/* Shown on hover, in place of the label; always while hidden. */}
+      <button type="button" className="layer-eye" title={hidden ? "Show layer" : "Hide layer"} aria-pressed={hidden} onClick={toggleHidden}>
+        {hidden ? <EyeOff size={13} /> : <Eye size={13} />}
+      </button>
     </div>
   );
 });
@@ -93,32 +109,36 @@ function walkVisible(
   depth: number,
   expanded: ReadonlySet<string>,
   selectedKey: string | null,
+  hiddenLayers: ReadonlySet<string>,
   inSelected: boolean,
   parentInComponent: boolean,
+  inHidden: boolean,
   out: FlatRow[],
 ) {
   const isSelected = node.key === selectedKey;
+  const hidden = hiddenLayers.has(node.key);
+  const dimmed = inHidden || hidden;
   const inComponent = parentInComponent || Boolean(node.component);
   const selectionRole: SelectionRole = isSelected ? "root" : inSelected ? "descendant" : "none";
   // The slot belongs to the rendering tree. In the sidebar its layers sit
   // alongside their target and stay visible when the target is collapsed.
   let maskRow: number | undefined;
   for (const mask of node.mask?.children ?? []) {
-    maskRow = walkVisible(mask, depth, expanded, selectedKey, inSelected, inComponent, out);
+    maskRow = walkVisible(mask, depth, expanded, selectedKey, hiddenLayers, inSelected, inComponent, dimmed, out);
   }
   const row = out.length;
-  out.push({ node, depth, inComponent, selectionRole, selectionEdge: "none", maskDistance: maskRow === undefined ? 0 : row - maskRow });
+  out.push({ node, depth, inComponent, selectionRole, selectionEdge: "none", maskDistance: maskRow === undefined ? 0 : row - maskRow, hidden, dimmed });
   if (expanded.has(node.key)) {
     for (const child of node.children) {
-      walkVisible(child, depth + 1, expanded, selectedKey, isSelected || inSelected, inComponent, out);
+      walkVisible(child, depth + 1, expanded, selectedKey, hiddenLayers, isSelected || inSelected, inComponent, dimmed, out);
     }
   }
   return row;
 }
 
-function buildRows(root: ViewNode, expanded: ReadonlySet<string>, selectedKey: string | null): FlatRow[] {
+function buildRows(root: ViewNode, expanded: ReadonlySet<string>, selectedKey: string | null, hiddenLayers: ReadonlySet<string>): FlatRow[] {
   const rows: FlatRow[] = [];
-  walkVisible(root, 0, expanded, selectedKey, false, false, rows);
+  walkVisible(root, 0, expanded, selectedKey, hiddenLayers, false, false, false, rows);
   for (let i = 0; i < rows.length; i++) {
     const role = rows[i].selectionRole;
     if (role === "none") continue;
@@ -137,6 +157,7 @@ export function LayerTree() {
   const frames = useViewerState((s) => s.model.frames);
   const selected = useViewerState((s) => s.selected);
   const hovered = useViewerState((s) => s.hovered);
+  const hiddenLayers = useViewerState((s) => s.hiddenLayers);
   // Everything starts collapsed. Keys are stable across rebuilds, so this survives reloads of the file.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -175,7 +196,7 @@ export function LayerTree() {
       {frames.length === 0 && <Empty>No artboards.</Empty>}
       {frames.map((frame) =>
         frame.root ? (
-          buildRows(frame.root, expanded, selected).map((row, index) => (
+          buildRows(frame.root, expanded, selected, hiddenLayers).map((row, index) => (
             <LayerRow
               key={row.node.key}
               node={row.node}
@@ -184,6 +205,8 @@ export function LayerTree() {
               selectionRole={row.selectionRole}
               selectionEdge={row.selectionEdge}
               maskDistance={row.maskDistance}
+              hidden={row.hidden}
+              dimmed={row.dimmed}
               startsFrame={index === 0}
               hovered={row.node.key === hovered}
               collapsed={!expanded.has(row.node.key)}
