@@ -264,6 +264,11 @@ export class TileCache {
     return { tiles, deferred: budget.deferred };
   }
 
+  /** Whether the artboard's content changed within the last REPAINT_MS. */
+  private changedRecently(f: ViewFrame): boolean {
+    return performance.now() - (this.repainted.get(f.name) ?? -Infinity) < REPAINT_MS;
+  }
+
   private forget(name: string) {
     for (const picture of this.recordings.get(name)?.values() ?? []) picture.delete();
     this.recordings.delete(name);
@@ -313,7 +318,12 @@ export class TileCache {
     const opsBefore = budget.ops;
     const pic = this.pictureFor(f, targetScale / ctx.dpr, budget);
     if (!pic) return null;
-    if (budget.ops > opsBefore && budget.spentMs >= limitMs) {
+    // A recording that used up the budget is normally rasterized next frame. An
+    // artboard whose content just changed (motion in Play mode) gets a new tree
+    // every frame, which drops the recording before it was ever shown, so the
+    // screen would hold a stale tile for as long as the motion stays expensive.
+    // Rasterize it now instead: the budget still keeps later artboards waiting.
+    if (budget.ops > opsBefore && budget.spentMs >= limitMs && !this.changedRecently(f)) {
       if (deferOnSkip) budget.deferred = true;
       return null;
     }
