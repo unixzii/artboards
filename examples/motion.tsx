@@ -201,11 +201,12 @@ function Note({ note, p }: { note: (typeof NOTES)[number]; p: number }) {
   );
 }
 
-function NoteList({ shown, entrance }: { shown: boolean; entrance: boolean }) {
+function NoteList({ shown }: { shown: boolean }) {
   // A chain: each card's spring follows the previous card's value, so they
-  // arrive one after another. The number of springs never changes.
+  // arrive one after another. The number of springs never changes. Every
+  // card starts at 0, so the list enters whenever it mounts.
   let v = shown ? 1 : 0;
-  const steps = NOTES.map(() => (v = useSpring(v, { duration: 400, bounce: 0.3, from: entrance ? 0 : undefined })));
+  const steps = NOTES.map(() => (v = useSpring(v, { duration: 400, bounce: 0.3, from: 0 })));
   return (
     <Column width="fill" gap={10}>
       {NOTES.map((note, i) => (
@@ -222,7 +223,7 @@ export function Cascade() {
     <Frame width={390} height={640} fill="#f8fafc">
       <Column width="fill" height="fill" padding={24} gap={20}>
         <Title title="Cascade" hint="Chained springs: every card follows the one before it. Replay remounts the list so it enters again." />
-        <NoteList key={run} shown={shown} entrance={run > 0} />
+        <NoteList key={run} shown={shown} />
         <Row width="fill" gap={12}>
           <PressButton label={shown ? "Hide" : "Show"} onClick={() => setShown(!shown)} />
           <PressButton

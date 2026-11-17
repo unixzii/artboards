@@ -46,6 +46,12 @@ export interface ViewerState {
   panelsHidden: boolean;
   /** "static": a site from `artboards build`; comments stay in this browser until exported. */
   mode: Backend["mode"];
+  /** Artboards whose motion is playing right now, by name. */
+  animating: ReadonlySet<string>;
+  /** Play mode with animation time held still. */
+  paused: boolean;
+  /** Animation speed: 1 is real time. */
+  speed: number;
 }
 
 export interface StageElements {
@@ -91,6 +97,9 @@ export class Viewer {
     measuring: false,
     panelsHidden: false,
     mode: "dev",
+    animating: new Set(),
+    paused: false,
+    speed: 1,
   });
   private backend: Backend;
   private createStage: StageBackendFactory;
@@ -121,6 +130,7 @@ export class Viewer {
       () => {
         if (this.store.get().ready) this.store.set({ diagnostics: this.mergedDiagnostics() });
       },
+      () => this.store.set({ animating: this.host.animating }),
     );
   }
 
@@ -428,8 +438,52 @@ export class Viewer {
     this.hoveredIds = [];
     this.store.set({ tool, draft: tool === "comment" ? this.store.get().draft : null, clickable: false, measuring: false });
     // Motion runs only in Play mode; elsewhere artboards hold the state their animations settle in.
+    if (tool !== "play") this.setPaused(false);
     this.host.setPlaying(tool === "play");
     if (tool === "play") this.hover(null);
+  }
+
+  // ------------------------------------------------------------------- motion
+  // The control strip. Motion only runs in Play mode, so each control enters it.
+
+  private setPaused(paused: boolean) {
+    this.store.set({ paused });
+    this.host.setPaused(paused);
+  }
+
+  /** Pauses or resumes motion; outside Play mode, starts playing. */
+  togglePaused() {
+    if (this.store.get().tool !== "play") {
+      this.setTool("play");
+      this.setPaused(false);
+    } else this.setPaused(!this.store.get().paused);
+  }
+
+  /** Pauses and moves motion on by one 60 Hz frame. */
+  stepFrame() {
+    if (this.store.get().tool !== "play") this.setTool("play");
+    this.setPaused(true);
+    this.host.step();
+  }
+
+  setSpeed(speed: number) {
+    this.store.set({ speed });
+    this.host.setSpeed(speed);
+  }
+
+  /** Plays an artboard's motion again from its mount, in its current variants. */
+  replay(frame: string) {
+    if (this.store.get().tool !== "play") this.setTool("play");
+    this.setPaused(false);
+    this.forgetPointer(frame);
+    void this.host.replay(frame);
+  }
+
+  /** Drops pointer capture and hover state inside an artboard that is about to remount. */
+  private forgetPointer(frame: string) {
+    if (this.captured?.key.startsWith(`${frame}/`)) this.captured = null;
+    const byId = this.store.get().model.byId;
+    this.hoveredIds = this.hoveredIds.filter((id) => byId.get(id)?.frame.name !== frame);
   }
 
   /** Hides or shows both side panels at once. */
@@ -470,9 +524,7 @@ export class Viewer {
 
   /** Puts an artboard back in its initial state, scrolled to the start. */
   resetFrame(frame: string) {
-    if (this.captured?.key.startsWith(`${frame}/`)) this.captured = null;
-    const byId = this.store.get().model.byId;
-    this.hoveredIds = this.hoveredIds.filter((id) => byId.get(id)?.frame.name !== frame);
+    this.forgetPointer(frame);
     for (const key of this.scrolls.keys()) if (key.startsWith(`${frame}/`)) this.scrolls.delete(key);
     void this.host.reset(frame);
   }

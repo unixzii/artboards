@@ -9,6 +9,7 @@ import { measure } from "../core/measure.ts";
 import { bottomCenter, canvasBox, describe, pinPosition, sizing, type ViewFrame, type ViewNode } from "../core/model.ts";
 import { anchor } from "./anchor.ts";
 import { attachInput } from "./input.ts";
+import { MotionStrip } from "./MotionStrip.tsx";
 
 /** "Modified" with a reset button, on an artboard that is not in its initial state. */
 function ModifiedBadge({ frame }: { frame: ViewFrame }) {
@@ -34,6 +35,7 @@ function ModifiedBadge({ frame }: { frame: ViewFrame }) {
 function FrameLabel({ frame }: { frame: ViewFrame }) {
   const viewer = useViewer();
   const selected = useViewerState((s) => s.selected);
+  const animating = useViewerState((s) => s.animating.has(frame.name));
   const error = frame.error;
   if (error) {
     // Fills the placeholder box the renderer draws for a failed artboard.
@@ -52,7 +54,7 @@ function FrameLabel({ frame }: { frame: ViewFrame }) {
   }
   const root = frame.root!;
   // No wider than the artboard on screen: the name stays (cut with an ellipsis),
-  // then "Modified", then the size, each dropped whole when it no longer fits.
+  // then "Modified", then the size, then "Animating", each dropped whole when it no longer fits.
   return (
     <div
       className={`anchored frame-label above${root.key === selected ? " selected" : ""}`}
@@ -65,6 +67,7 @@ function FrameLabel({ frame }: { frame: ViewFrame }) {
       <span className="frame-size">
         {frame.w} × {frame.h}
       </span>
+      {animating && <span className="animating">Animating</span>}
     </div>
   );
 }
@@ -222,6 +225,7 @@ export function Stage() {
         <Pins />
         <CommentBox />
       </div>
+      <MotionStrip />
       <Notice />
       {!ready && <div id="boot">Loading…</div>}
     </main>

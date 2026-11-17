@@ -29,6 +29,7 @@ export interface LiveFrameInput {
   error?: Diagnostic;
   variants: { list(): VariantInfo[] };
   modified: boolean;
+  animated?: boolean;
 }
 
 export interface ViewFrame {
@@ -38,6 +39,8 @@ export interface ViewFrame {
   variants: VariantInfo[];
   /** Not in its initial state: a variant was changed or a layer clicked. Comments are off until it is reset. */
   modified: boolean;
+  /** Whether it uses motion (`useSpring`, `useAnimationTime`), moving or not. */
+  animated: boolean;
   /** Null when the artboard failed to build. */
   root: ViewNode | null;
   /** Source tree identity from DesignHost, used to preserve unchanged caches across updates. */
@@ -263,6 +266,7 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
       old.source === input.root &&
       old.error === input.error &&
       old.modified === input.modified &&
+      old.animated === !!input.animated &&
       old.x === x &&
       old.y === y &&
       old.w === w &&
@@ -275,6 +279,7 @@ export function buildModel(inputs: LiveFrameInput[], scrolls: ReadonlyMap<string
           error: input.error,
           variants,
           modified: input.modified,
+          animated: !!input.animated,
           root: null,
           source: input.root,
           x,

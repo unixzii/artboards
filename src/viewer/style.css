@@ -113,7 +113,8 @@ svg.lucide { flex: none; display: block; }
 .group.segmented button { padding: 3px 10px; min-width: 0; border-radius: 6px; color: var(--muted); }
 .group.segmented button + button { border-left: 0; }
 .group.segmented button:hover { background: transparent; color: var(--text); }
-.group.segmented button.on { background: var(--thumb); color: var(--accent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
+/* Same weight as the other segments, so switching never changes widths. */
+.group.segmented button.on { font-weight: inherit; background: var(--thumb); color: var(--accent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
 
 /* Side panels & resize handles */
 .side-panel {
@@ -421,6 +422,41 @@ svg.lucide { flex: none; display: block; }
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
+/* Motion controls floating at the bottom of the canvas. */
+#motion-strip {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+#motion-strip ~ #notice { bottom: 72px; }
+.strip-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.strip-button:hover { background: var(--hover); }
+.strip-button:active { background: var(--track); }
+.strip-divider { align-self: stretch; width: 1px; margin: 0 6px; background: var(--line); }
+#motion-strip .strip-speed { padding: 3px; border-radius: 10px; }
+#motion-strip .strip-speed button { height: 30px; padding: 0 10px; border-radius: 7px; font-variant-numeric: tabular-nums; }
+@media (prefers-color-scheme: dark) {
+  #motion-strip { background: var(--panel); box-shadow: 0 0 0 1px var(--line), 0 4px 16px rgba(0, 0, 0, 0.4); }
+}
 /* Screen-sized and pinned to the window's corner by the renderer; the stage clips it. */
 #canvas { position: absolute; left: 0; top: 0; display: block; }
 #overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; --s: 1; --tx: 0; --ty: 0; }
@@ -464,6 +500,20 @@ svg.lucide { flex: none; display: block; }
 }
 .frame-label .frame-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .frame-label.above .modified { margin-left: 0; }
+.frame-label .animating { color: var(--ok); }
+.frame-label .animating::before {
+  content: "";
+  display: inline-block;
+  vertical-align: 1px;
+  margin-right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: animating-pulse 1.2s ease-in-out infinite;
+}
+@keyframes animating-pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .frame-label .animating::before { animation: none; } }
 .frame-label .modified { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; color: var(--warn); }
 .frame-label .modified button { display: inline-flex; padding: 1px; border: 0; background: none; color: inherit; cursor: pointer; }
 .frame-label .modified button:hover { color: var(--text); }

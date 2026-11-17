@@ -35,6 +35,8 @@ export interface MountedArtboard {
   variants: VariantStore;
   /** Whether the artboard is no longer in its initial state: a variant was changed or a layer clicked. */
   modified: boolean;
+  /** Whether a mounted component uses `useSpring` or `useAnimationTime`. */
+  animated: boolean;
   warnings: Diagnostic[];
   error?: Diagnostic;
 }
@@ -69,12 +71,14 @@ function managed(entry: FrameEntry, variants: VariantStore, playing: boolean): M
     root: null,
     variants,
     modified: false,
+    animated: false,
     warnings: [],
     disposed: false,
     container: null,
     clicked: false,
   };
   Object.defineProperty(item, "modified", { enumerable: true, get: () => item.clicked || item.variants.overrides().length > 0 });
+  Object.defineProperty(item, "animated", { enumerable: true, get: () => !item.disposed && clock.animated });
   return item;
 }
 
@@ -93,16 +97,25 @@ export class DesignHost {
   private pendingJobs = 0;
   /** Play mode: animation clocks run and a frame loop advances them. */
   private playing = false;
+  /** Play mode with time held still: springs stay where they are until resumed or stepped. */
+  private paused = false;
+  /** Animation time per real time, for slow motion. */
+  private speed = 1;
+  /** Artboards whose motion is playing right now, by name. */
+  animating: ReadonlySet<string> = new Set();
+  private onMotion: () => void;
   private frameRequest: number | null = null;
   private loadSeq = 0;
   private lintTimer: ReturnType<typeof setTimeout> | undefined;
   /** Variant values picked per artboard, carried into the next bundle. */
   private remembered = new Map<string, [string, VariantValue][]>();
 
-  constructor(engine: RenderEngine, onChange: () => void, onDiagnostics: () => void = onChange) {
+  /** `onMotion`: the set of `animating` artboards changed. */
+  constructor(engine: RenderEngine, onChange: () => void, onDiagnostics: () => void = onChange, onMotion: () => void = () => {}) {
     this.engine = engine;
     this.onChange = onChange;
     this.onDiagnostics = onDiagnostics;
+    this.onMotion = onMotion;
   }
 
   dispose() {
@@ -186,6 +199,56 @@ export class DesignHost {
       cancelAnimationFrame(this.frameRequest);
       this.frameRequest = null;
     }
+    this.syncMotion();
+  }
+
+  /**
+   * Holds animation time still without settling springs, unlike leaving Play
+   * mode. Interactions still retarget springs; they move once time runs again.
+   */
+  setPaused(paused: boolean) {
+    if (this.paused === paused) return;
+    this.paused = paused;
+    for (const item of this.managed) item.lastTick = undefined;
+    this.syncMotion();
+  }
+
+  /** Slow motion: 1 is real time, 0.25 a quarter of it. */
+  setSpeed(speed: number) {
+    this.speed = speed;
+  }
+
+  /** Advances every animating artboard by one 60 Hz frame. Use while paused. */
+  step() {
+    if (!this.playing) return;
+    for (const item of this.managed) {
+      if (item.disposed || !item.clock.active) continue;
+      this.runClock(item, () => item.clock.advance(1000 / 60));
+    }
+  }
+
+  /** Remounts an artboard on a fresh clock, so entrance motion plays again. Variant values stay; click state starts over. */
+  replay(name: string): Promise<void> {
+    return this.enqueue(async () => {
+      const i = this.managed.findIndex((f) => f.name === name);
+      if (i < 0) return;
+      const old = this.managed[i];
+      this.teardown(old);
+      const item = managed(old.entry, new VariantStore([], old.variants.overrides()), this.playing);
+      this.managed[i] = item;
+      await this.mount(item);
+      this.syncDiagnostics();
+      this.onChange();
+    });
+  }
+
+  /** Recomputes `animating`: artboards that have something reading the clock while time runs. */
+  private syncMotion() {
+    const running = this.playing && !this.paused;
+    const now = new Set(running ? this.managed.filter((f) => !f.disposed && f.clock.active).map((f) => f.name) : []);
+    if (now.size === this.animating.size && [...now].every((n) => this.animating.has(n))) return;
+    this.animating = now;
+    this.onMotion();
   }
 
   private requestFrame() {
@@ -197,7 +260,7 @@ export class DesignHost {
     this.frameRequest = null;
     if (!this.playing) return;
     // Let the previous frame's relayout land before rendering the next one.
-    if (this.pendingJobs === 0) {
+    if (this.pendingJobs === 0 && !this.paused) {
       for (const item of this.managed) {
         if (item.disposed || !item.clock.active) {
           item.lastTick = undefined;
@@ -206,9 +269,10 @@ export class DesignHost {
         // Long stalls (a hidden tab) don't fast-forward motion.
         const dt = item.lastTick === undefined ? 1000 / 60 : Math.min(now - item.lastTick, 100);
         item.lastTick = now;
-        this.runClock(item, () => item.clock.advance(dt));
+        this.runClock(item, () => item.clock.advance(dt * this.speed));
       }
     }
+    this.syncMotion();
     this.requestFrame();
   };
 

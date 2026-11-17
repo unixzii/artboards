@@ -4,7 +4,7 @@
 // clock stands still and springs report their target, so static output is the
 // state after every animation has settled.
 
-import { createContext, useContext, useRef, useSyncExternalStore } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { DslError } from "./schema.ts";
 
 export class AnimationClock {
@@ -38,6 +38,20 @@ export class AnimationClock {
       this.springs.delete(listener);
     };
   };
+
+  /** Mounted motion hooks, moving or at rest. */
+  private users = 0;
+  readonly retain = () => {
+    this.users++;
+    return () => {
+      this.users--;
+    };
+  };
+
+  /** Whether anything mounted uses motion, even if it is at rest right now. */
+  get animated(): boolean {
+    return this.users > 0;
+  }
 
   /** Whether anything renders from the clock and needs ticks. */
   get active(): boolean {
@@ -92,6 +106,7 @@ function useTicks(active: boolean, spring: boolean): number {
   const clock = useContext(AnimationContext) ?? STILL;
   const mounted = useRef<number | null>(null);
   if (mounted.current === null) mounted.current = clock.now();
+  useLayoutEffect(clock.retain, [clock]);
   const subscribe = !active ? noSubscribe : spring ? clock.subscribeSpring : clock.subscribe;
   useSyncExternalStore(subscribe, active ? clock.snapshot : zero);
   return clock.now() - mounted.current;
